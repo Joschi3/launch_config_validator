@@ -73,7 +73,7 @@ def load_yaml(path: Path) -> Any:
         return yaml.load(f, Loader=UniqueKeyLoader)
 
 
-# --- Issue representation ---------------------------------------------------
+# --- Issue & file metadata --------------------------------------------------
 
 
 @dataclass
@@ -83,15 +83,29 @@ class Issue:
     kind: str = "error"  # could later support "warning"
 
 
+@dataclass
+class FileInfo:
+    path: Path
+    data: Any
+    is_launch: bool
+    contains_ros_params: bool
+    is_param_config: bool = False  # filled in second pass
+
+
 # --- JSON Schemas -----------------------------------------------------------
 
 # Launch YAML schema
-with open(Path(__file__).parent / "schemas" / "yaml_launch.json", "r", encoding="utf-8") as f:
+with open(
+    Path(__file__).parent / "schemas" / "yaml_launch.json", "r", encoding="utf-8"
+) as f:
     LAUNCH_SCHEMA = json.load(f)
 
 # Config YAML schema
-with open(Path(__file__).parent / "schemas" / "yaml_config.json", "r", encoding="utf-8") as f:
+with open(
+    Path(__file__).parent / "schemas" / "yaml_config.json", "r", encoding="utf-8"
+) as f:
     CONFIG_SCHEMA = json.load(f)
+
 
 # --- Helpers for classification & traversal ---------------------------------
 
@@ -167,13 +181,15 @@ def resolve_find_pkg_share(expr: str, current_file: Path) -> Tuple[str, List[Iss
             )
             # keep original; caller will see unresolved '$(' and skip existence check
             return match.group(0)
+        if "$" in pkg:
+            return "$(var ...)"  # skip resolution if there are other substitutions
         try:
             share = get_package_share_directory(pkg)
         except Exception as e:  # noqa: BLE001
             issues.append(
                 Issue(
                     current_file,
-                    f"Cannot resolve package '{pkg}' in find-pkg-share: {e}",
+                    f"Cannot resolve package '{pkg}' in find-pkg-share: ",
                 )
             )
             return match.group(0)
@@ -269,6 +285,26 @@ def validate_with_schema(
     return issues
 
 
+# --- Launch traversal helpers ----------------------------------------------
+
+
+def iter_launch_entries(data: Any):
+    """
+    Yield (entry, node_data, include_data) for each launch array item.
+    """
+    if not isinstance(data, dict):
+        return
+    launch_list = data.get("launch", [])
+    if not isinstance(launch_list, list):
+        return
+    for entry in launch_list:
+        if not isinstance(entry, dict):
+            continue
+        node_data = entry.get("node")
+        include_data = entry.get("include")
+        yield entry, node_data, include_data
+
+
 # --- Semantic checks & reference collection ---------------------------------
 
 
@@ -278,14 +314,8 @@ def collect_config_references_from_launch(path: Path, data: Any) -> Set[Path]:
     This is used only to classify config files (whether they're referenced at all).
     """
     refs: Set[Path] = set()
-    launch_list = data.get("launch", [])
-    if not isinstance(launch_list, list):
-        return refs
 
-    for entry in launch_list:
-        if not isinstance(entry, dict):
-            continue
-        node_data = entry.get("node")
+    for _entry, node_data, _include_data in iter_launch_entries(data):
         if not isinstance(node_data, dict):
             continue
         params = node_data.get("param")
@@ -316,16 +346,9 @@ def check_launch_semantics(path: Path, data: Any) -> List[Issue]:
     - param.from files exist
     """
     issues: List[Issue] = []
-    launch_list = data.get("launch", [])
-    if not isinstance(launch_list, list):
-        return issues
 
-    for entry in launch_list:
-        if not isinstance(entry, dict):
-            continue
-
+    for _entry, node_data, include_data in iter_launch_entries(data):
         # include.file
-        include_data = entry.get("include")
         if isinstance(include_data, dict):
             file_value = include_data.get("file")
             if isinstance(file_value, str):
@@ -341,15 +364,9 @@ def check_launch_semantics(path: Path, data: Any) -> List[Issue]:
                     suggestion = suggest_similar_path(inc_path)
                     hint = f" (closest match: {suggestion})" if suggestion else ""
                     message = f"Included launch file does not exist: {inc_path}{hint}"
-                    issues.append(
-                        Issue(
-                            path,
-                            message,
-                        )
-                    )
+                    issues.append(Issue(path, message))
 
         # node.param.from
-        node_data = entry.get("node")
         if isinstance(node_data, dict):
             params = node_data.get("param")
             if isinstance(params, list):
@@ -365,7 +382,11 @@ def check_launch_semantics(path: Path, data: Any) -> List[Issue]:
                         cfg_path = make_path_relative_to_file(resolved, path)
                         if not cfg_path.is_file():
                             suggestion = suggest_similar_path(cfg_path)
-                            hint = f" (closest match: {suggestion})" if suggestion else ""
+                            hint = (
+                                f" (closest match: {suggestion})"
+                                if suggestion
+                                else ""
+                            )
                             issues.append(
                                 Issue(
                                     path,
@@ -395,14 +416,15 @@ def check_config_semantics(path: Path, data: Any) -> List[Issue]:
 
         cfg_path = make_path_relative_to_file(resolved, path)
         if not cfg_path.is_file():
-            issues.append(
-                Issue(path, f"Referenced file does not exist: {cfg_path}")
-            )
+            issues.append(Issue(path, f"Referenced file does not exist: {cfg_path}"))
 
     return issues
 
 
-# --- File collection --------------------------------------------------
+# --- File collection --------------------------------------------------------
+
+
+SCAN_DIR_NAMES = ("launch", "test", "config", "configs")
 
 
 def collect_files(paths: List[str]) -> List[Path]:
@@ -410,10 +432,7 @@ def collect_files(paths: List[str]) -> List[Path]:
 
     def is_launch_or_config_file(p: Path) -> bool:
         # either a parent (recursive) directory is a launch/config/configs/test directory
-        for part in p.parts:
-            if part in ("launch", "test", "config", "configs"):
-                return True
-        return False
+        return any(part in SCAN_DIR_NAMES for part in p.parts)
 
     for p in paths:
         path = Path(p)
@@ -431,22 +450,48 @@ def collect_files(paths: List[str]) -> List[Path]:
     return sorted(set(result))
 
 
-# --- Main check logic (two-pass) -------------------------------------------
+# --- Classification (first pass) -------------------------------------------
 
 
-def check_files(argv: List[str]) -> int:
-    parser = argparse.ArgumentParser(
-        description="Validate ROS 2 YAML launch and config files using JSON Schema "
-        "and semantic checks (file existence)."
-    )
-    parser.add_argument(
-        "paths",
-        nargs="+",
-        help="YAML files or directories containing YAML files",
-    )
-    args = parser.parse_args(argv)
+def classify_files(files: List[Path]) -> Tuple[List[FileInfo], Set[Path], List[Issue]]:
+    """
+    Load YAML, classify as launch/non-launch, record ros__parameters presence,
+    and collect referenced config paths from launch files.
+    """
+    infos: List[FileInfo] = []
+    referenced_config_paths: Set[Path] = set()
+    issues: List[Issue] = []
 
-    files = collect_files(args.paths)
+    for path in files:
+        try:
+            data = load_yaml(path)
+        except Exception as e:  # noqa: BLE001
+            issues.append(Issue(path, f"YAML syntax error: {e}"))
+            continue
+
+        if data is None:
+            issues.append(Issue(path, "YAML file is empty"))
+            continue
+
+        is_launch = is_launch_file(path, data)
+        info = FileInfo(
+            path=path,
+            data=data,
+            is_launch=is_launch,
+            contains_ros_params=contains_ros_parameters(data),
+        )
+        infos.append(info)
+
+        if is_launch:
+            referenced_config_paths |= collect_config_references_from_launch(path, data)
+
+    return infos, referenced_config_paths, issues
+
+
+# --- Main check logic (second pass) ----------------------------------------
+
+
+def check_files(files: List[Path]) -> int:
     if not files:
         print("No YAML files found.", file=sys.stderr)
         return 0
@@ -454,38 +499,15 @@ def check_files(argv: List[str]) -> int:
     all_issues: List[Issue] = []
 
     # First pass: load + classify + collect references
-    file_data: Dict[Path, Any] = {}
-    file_is_launch: Dict[Path, bool] = {}
-    file_contains_ros_params: Dict[Path, bool] = {}
-    referenced_config_paths: Set[Path] = set()
-
-    for path in files:
-        try:
-            data = load_yaml(path)
-        except Exception as e:  # noqa: BLE001
-            all_issues.append(Issue(path, f"YAML syntax error: {e}"))
-            continue
-
-        if data is None:
-            all_issues.append(Issue(path, "YAML file is empty"))
-            continue
-
-        file_data[path] = data
-        is_launch = is_launch_file(path, data)
-        file_is_launch[path] = is_launch
-        file_contains_ros_params[path] = contains_ros_parameters(data)
-
-        if is_launch:
-            referenced_config_paths |= collect_config_references_from_launch(path, data)
+    infos, referenced_config_paths, first_pass_issues = classify_files(files)
+    all_issues.extend(first_pass_issues)
 
     # Second pass: schema + semantics + "config-folder classification" rule
-    for path in files:
-        data = file_data.get(path)
-        if data is None:
-            # Already had syntax/empty issue in pass 1
-            continue
+    for info in infos:
+        path = info.path
+        data = info.data
 
-        if file_is_launch.get(path, False):
+        if info.is_launch:
             # Launch file
             all_issues.extend(
                 validate_with_schema(data, LAUNCH_SCHEMA, path, "launch-schema")
@@ -497,12 +519,11 @@ def check_files(argv: List[str]) -> int:
             abs_path = path.resolve()
 
             # Decide if this should be treated as a ROS 2 parameter config
-            is_param_config = in_config_dir and (
-                file_contains_ros_params.get(path, False)
-                or abs_path in referenced_config_paths
+            info.is_param_config = in_config_dir and (
+                info.contains_ros_params or abs_path in referenced_config_paths
             )
 
-            if is_param_config:
+            if info.is_param_config:
                 # This is a ROS 2 param config: enforce config schema + semantic path checks
                 all_issues.extend(
                     validate_with_schema(data, CONFIG_SCHEMA, path, "config-schema")
@@ -515,7 +536,10 @@ def check_files(argv: List[str]) -> int:
     return 1 if any(i.kind == "error" for i in all_issues) else 0
 
 
-def parse_args() -> List[str]:
+# --- CLI --------------------------------------------------------------------
+
+
+def parse_args(argv: Optional[List[str]] = None) -> List[str]:
     parser = argparse.ArgumentParser(
         description="Validate ROS 2 YAML launch and config files using JSON Schema "
         "and semantic checks (file existence)."
@@ -525,15 +549,17 @@ def parse_args() -> List[str]:
         nargs="+",
         help="YAML files or directories containing YAML files",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return args.paths
 
 
-def main() -> int:
-    # paths = parse_args()
-    paths = ["/home/aljoscha-schmidt/hector/src/athena_launch"]
-    return check_files(paths)
+def main(argv: Optional[List[str]] = None) -> int:
+    paths = parse_args(argv)
+    files = collect_files(paths)
+    raise SystemExit(check_files(files))
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+   paths = ["/home/aljoscha-schmidt/hector/src"]
+   files = collect_files(paths)
+   raise SystemExit(check_files(files))
