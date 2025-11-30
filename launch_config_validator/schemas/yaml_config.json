@@ -1,0 +1,78 @@
+{
+  "title": "ROS 2 Parameter File Schema (Flexible Root)",
+  "description": "A schema for validating ROS 2 YAML parameter files. It allows for multiple top-level keys, including the global wildcard '/**' and specific node names (e.g., 'planner_server'). This supports config files that do not strictly start with '/**'.",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  
+  "definitions": {
+    "NodeParameters": {
+      "description": "A set of key-value pairs representing ROS 2 parameters (including nested parameters). Since ROS parameters can be any primitive type, array, or nested object, the structure is kept flexible here.",
+      "type": "object",
+      "additionalProperties": {
+        "description": "A single ROS 2 parameter value.",
+        "oneOf": [
+          {"type": "string"},
+          {"type": "number"},
+          {"type": "boolean"},
+          {"type": "array", "items": {}},
+          {"type": "object", "additionalProperties": true}
+        ]
+      }
+    },
+    
+    "NodeConfigContent": {
+      "description": "The configuration block (the VALUE) for a specific ROS 2 node, ensuring the mandatory 'ros__parameters' field is present. It also allows for sibling plugin/configuration blocks.",
+      "type": "object",
+      "properties": {
+        "ros__parameters": {
+          "description": "The mandatory container for the node's standard ROS 2 parameters.",
+          "$ref": "#/definitions/NodeParameters"
+        }
+      },
+      "required": ["ros__parameters"],
+      "additionalProperties": {
+        "description": "Allows for non-standard configuration keys (e.g., plugin-specific configs like 'GridBased', or complex nested structs) that exist as siblings to 'ros__parameters'.",
+        "type": "object",
+        "additionalProperties": true 
+      }
+    },
+
+    "WildcardConfigContent": {
+      "description": "The configuration object found under the global wildcard key '/**'. It may contain global default parameters and nested node-specific overrides.",
+      "type": "object",
+      "properties": {
+        "ros__parameters": {
+          "description": "Optional global/default parameters for all nodes when defined at this level.",
+          "$ref": "#/definitions/NodeParameters"
+        }
+      },
+      "patternProperties": {
+        "^(?!ros__parameters$)[a-zA-Z0-9_/]+$": {
+          "description": "Configuration block for a named ROS 2 node, nested under '/**' for global scope.",
+          "anyOf": [
+             {"$ref": "#/definitions/NodeConfigContent"},
+             {"type": "object", "additionalProperties": true}
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "minProperties": 1
+    }
+  },
+  
+  "type": "object",
+  "minProperties": 1,
+  
+  "properties": {
+    "/**": {
+      "description": "The top-level wildcard key (/**).",
+      "$ref": "#/definitions/WildcardConfigContent"
+    }
+  },
+  "patternProperties": {
+    "^(?!ros__parameters$)[a-zA-Z0-9_/]+$": {
+      "description": "Configuration for a specific ROS 2 node name at the root level (e.g., 'planner_server' or '/namespace/node_name'). The negative lookahead prevents matching 'ros__parameters'.",
+      "$ref": "#/definitions/NodeConfigContent"
+    }
+  },
+  "additionalProperties": false
+}
