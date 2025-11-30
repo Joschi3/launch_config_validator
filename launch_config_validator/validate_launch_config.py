@@ -21,8 +21,9 @@ import argparse
 import sys
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, List, Tuple, Dict, Set
+from typing import Any, List, Tuple, Dict, Set, Optional
 import json
 
 # --- Dependencies -----------------------------------------------------------
@@ -197,6 +198,60 @@ def make_path_relative_to_file(resolved: str, current_file: Path) -> Path:
     return (current_file.parent / p).resolve()
 
 
+SIMILARITY_THRESHOLD = 0.5
+
+
+def _best_match_in_dir(directory: Path, target_name: str, require_dir: bool) -> Optional[Path]:
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return None
+    target_lower = target_name.lower()
+    best_score = 0.0
+    best_candidate: Optional[Path] = None
+    for candidate in entries:
+        try:
+            if require_dir and not candidate.is_dir():
+                continue
+            if not require_dir and not candidate.is_file():
+                continue
+        except OSError:
+            continue
+        score = SequenceMatcher(None, target_lower, candidate.name.lower()).ratio()
+        if score > best_score:
+            best_score = score
+            best_candidate = candidate
+    if best_candidate and best_score >= SIMILARITY_THRESHOLD:
+        return best_candidate
+    return None
+
+
+def suggest_similar_path(target: Path) -> Optional[Path]:
+    missing_parts: List[str] = []
+    current = target
+    while True:
+        if current.exists() and current.is_dir():
+            break
+        parent = current.parent
+        if parent == current:
+            return None
+        missing_parts.append(current.name)
+        current = parent
+    if not missing_parts:
+        return None
+    missing_parts.reverse()
+    candidate = current
+    for idx, part in enumerate(missing_parts):
+        if not candidate.is_dir():
+            return None
+        require_dir = idx < len(missing_parts) - 1
+        match = _best_match_in_dir(candidate, part, require_dir)
+        if match is None:
+            return None
+        candidate = match
+    return candidate
+
+
 # --- JSON Schema validation wrappers ----------------------------------------
 
 
@@ -283,10 +338,13 @@ def check_launch_semantics(path: Path, data: Any) -> List[Issue]:
 
                 inc_path = make_path_relative_to_file(resolved, path)
                 if not inc_path.is_file():
+                    suggestion = suggest_similar_path(inc_path)
+                    hint = f" (closest match: {suggestion})" if suggestion else ""
+                    message = f"Included launch file does not exist: {inc_path}{hint}"
                     issues.append(
                         Issue(
                             path,
-                            f"Included launch file does not exist: {inc_path}",
+                            message,
                         )
                     )
 
@@ -306,10 +364,12 @@ def check_launch_semantics(path: Path, data: Any) -> List[Issue]:
                             continue
                         cfg_path = make_path_relative_to_file(resolved, path)
                         if not cfg_path.is_file():
+                            suggestion = suggest_similar_path(cfg_path)
+                            hint = f" (closest match: {suggestion})" if suggestion else ""
                             issues.append(
                                 Issue(
                                     path,
-                                    f"Parameter file does not exist: {cfg_path}",
+                                    f"Parameter file does not exist: {cfg_path}{hint}",
                                 )
                             )
 
