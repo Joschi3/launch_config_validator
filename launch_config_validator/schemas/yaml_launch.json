@@ -1,38 +1,178 @@
 {
-    "type": "object",
-    "required": ["launch"],
-    "properties": {
-        "launch": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "node": {
-                        "type": "object",
-                        "required": ["pkg", "exec", "name"],
-                        "properties": {
-                            "pkg": {"type": "string"},
-                            "exec": {"type": "string"},
-                            "name": {"type": "string"},
-                            "param": {
-                                "type": "array",
-                                "items": {"type": "object"}
-                            }
-                        },
-                        "additionalProperties": true
-                    },
-                    "include": {
-                        "type": "object",
-                        "required": ["file"],
-                        "properties": {
-                            "file": {"type": "string"}
-                        },
-                        "additionalProperties": true
-                    }
-                },
-                "additionalProperties": true
-            }
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ROS 2 YAML Launch File Schema (Jazzy)",
+  "description": "Schema to validate the structure of a ROS 2 YAML launch file.",
+  "type": "object",
+  "required": ["launch"],
+  "additionalProperties": false,
+  "definitions": {
+    "ActionItem": {
+      "title": "Launch Action Item",
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "if": {
+          "type": "string"
+        },
+        "unless": {
+          "type": "string"
+        },
+        "elif": {
+          "type": "string"
         }
-    },
-    "additionalProperties": true
+      },
+      "anyOf": [
+        {
+          "required": ["node"],
+          "properties": {
+            "node": {
+              "title": "Node Action Properties",
+              "type": "object",
+              "required": ["pkg", "exec"],
+              "properties": {
+                "pkg": {"type": "string"},
+                "exec": {"type": "string"},
+                "name": {"type": "string"},
+                "namespace": {"type": "string"},
+                "output": {"type": "string"},
+                "respawn": {"type": "string"},
+                "args": {
+                  "oneOf": [
+                    {"type": "string"},
+                    {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  ]
+                },
+                "param": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {"type": "string"},
+                      {"type": "object", "additionalProperties": true}
+                    ]
+                  }
+                },
+                "remap": { 
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["from", "to"],
+                    "properties": {
+                      "from": {"type": "string"},
+                      "to": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "required": ["arg"],
+          "properties": {
+            "arg": {
+              "title": "Declare Launch Argument",
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": {"type": "string"},
+                "default": {"type": "string"}
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "required": ["push_ros_namespace"],
+          "properties": {
+            "push_ros_namespace": {
+              "type": "object",
+              "required": ["namespace"],
+              "properties": {
+                "namespace": {"type": "string"}
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "required": ["set_remap"],
+          "properties": {
+            "set_remap": {
+              "title": "Set Remap Action Properties",
+              "type": "object",
+              "required": ["from", "to"],
+              "properties": {
+                "from": {"type": "string"},
+                "to": {"type": "string"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "required": ["include"],
+          "properties": {
+            "include": {
+              "title": "Include Action Properties",
+              "type": "object",
+              "required": ["file"],
+              "properties": {
+                "file": {"type": "string"},
+                "arg": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "value"],
+                    "properties": {
+                      "name": {"type": "string"},
+                      "value": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "required": ["group"],
+          "properties": {
+            "group": {
+              "title": "Group Action Properties",
+              "type": "object",
+              "required": ["actions"],
+              "properties": {
+                "actions": {
+                  "type": "array",
+                  "items": {"$ref": "#/definitions/ActionItem"}
+                },
+                "namespace": {"type": "string"}
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    }
+  },
+  "properties": {
+    "launch": {
+      "title": "Launch Actions Array",
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/ActionItem"}
+    }
+  }
 }
