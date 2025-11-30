@@ -4,22 +4,28 @@ This tool validates ROS 2 YAML **launch files** and **parameter configs**.
 
 It checks:
 
-- **YAML syntax**
-  - using jsonschema to validate the yaml syntax of launch and confg files
-- **Semantic rules**:
+- **YAML syntax & structure**
+  - Parses YAML with a duplicate-key–safe loader (fails on repeated keys).
+  - Validates launch files against `schemas/yaml_launch.json`.
+  - Validates parameter configs against `schemas/yaml_config.json`.
+- **Semantic rules**
   - Resolves `$(find-pkg-share pkg)` using `ament_index_python`.
   - Verifies that included launch/config files actually exist.
+  - For YAMLs under `config/` or `configs/`:
+    - each file must either contain a `ros__parameters` block **or**
+    - be referenced from some launch file via `node.param[].from`.
 
 If any error is found, the script exits with status `1` and prints a human-readable message.
 
+---
 
 ## Usage
 
 Run on one or more files/directories:
 
 ```bash
-python3 validate_launch_config.py path1 [path2 ...]
-```
+python3 validate_launch_config.py [--isolated-ci] path1 [path2 ...]
+````
 
 Examples:
 
@@ -37,6 +43,23 @@ The script recursively scans for `*.yml` / `*.yaml` files below directories whos
 * `config`
 * `configs`
 * `test`
+
+### Isolated CI mode
+
+In some CI jobs the full ROS environment (and all dependent packages) is not available.
+Use `--isolated-ci` to **avoid failing on missing files and unresolved packages**:
+
+```bash
+python3 validate_launch_config.py --isolated-ci src/
+```
+
+In this mode:
+
+* Failures to resolve `$(find-pkg-share ...)` **do not produce errors**.
+* Missing referenced launch/config YAML files (includes, `param.from`, etc.) **do not produce errors**.
+* YAML parsing and JSON Schema validation still run as usual.
+
+---
 
 ## Pre-Commit Hook Integration
 
@@ -72,10 +95,9 @@ After that, every commit will automatically validate launch & config YAMLs, catc
 
 * YAML syntax errors / duplicate keys
 * Schema violations
-* Missing included launch/param files
+* Missing included launch/param files (unless `--isolated-ci` is used in the wrapper)
 
 before the changes land in the repo.
-
 
 ---
 
@@ -155,21 +177,29 @@ Each list entry is exactly one of these actions.
 **Supported fields inside `node`:**
 
 * `pkg` (string, required)
+
 * `exec` (string, required)
+
 * `name`, `namespace`, `output` (strings)
+
 * `respawn` (string, e.g. `"true"`)
+
 * `respawn_delay` (number or string)
+
 * `if`, `unless` (string, launch condition expressions)
+
 * `args`:
 
   * string (single command line) **or**
   * list of strings
+
 * `param`:
 
   * list of:
 
     * string (e.g. `my_pkg/config.yaml`) **or**
     * object with arbitrary keys (e.g. `{name, value, from, allow_substs, ...}`)
+
 * `remap`:
 
   * list of:
@@ -260,4 +290,4 @@ The validator treats a YAML file under `config/` or `configs/` as a **parameter 
       - from: "$(find-pkg-share my_pkg)/config/my_params.yaml"
 ```
 
-For those files, the tool applies `yaml_config.json` and checks that any referenced YAML-like paths exist (after resolving `$(find-pkg-share ...)` when possible).
+For those files, the tool applies `yaml_config.json` and (in normal mode) checks that any referenced YAML-like paths exist (after resolving `$(find-pkg-share ...)` when possible).

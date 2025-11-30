@@ -14,7 +14,7 @@ Features:
     * be referenced from some launch file via node.param[].from
 
 Usage:
-    python3 validate_launch_config.py path1 [path2 ...]
+    python3 validate_launch_config.py [--isolated-ci] path1 [path2 ...]
 """
 
 import argparse
@@ -52,7 +52,7 @@ except ImportError:
 class UniqueKeyLoader(yaml.SafeLoader):
     """YAML loader that rejects duplicate keys."""
 
-    def construct_mapping(self, node, deep=False):
+    def construct_mapping(self, node, deep: bool = False):
         mapping = {}
         for key_node, value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
@@ -162,16 +162,23 @@ def contains_ros_parameters(obj: Any) -> bool:
 FIND_PKG_SHARE_RE = re.compile(r"\$\(\s*find-pkg-share\s+([^)]+?)\s*\)")
 
 
-def resolve_find_pkg_share(expr: str, current_file: Path) -> tuple[str, list[Issue]]:
+def resolve_find_pkg_share(
+    expr: str, current_file: Path, isolated_ci: bool = False
+) -> tuple[str, list[Issue]]:
     """
     Replace $(find-pkg-share pkg_name) with the actual share directory.
     Returns (resolved_string, issues).
+
+    If isolated_ci is True, failures to resolve do NOT produce issues.
     """
     issues: list[Issue] = []
 
     def repl(match: re.Match) -> str:
         pkg = match.group(1).strip()
         if get_package_share_directory is None:
+            if isolated_ci:
+                # keep original; caller will see unresolved '$(' and skip existence check
+                return match.group(0)
             issues.append(
                 Issue(
                     current_file,
@@ -179,19 +186,22 @@ def resolve_find_pkg_share(expr: str, current_file: Path) -> tuple[str, list[Iss
                     "ament_index_python not available (ROS env not sourced?)",
                 )
             )
-            # keep original; caller will see unresolved '$(' and skip existence check
             return match.group(0)
+
         if "$" in pkg:
-            return "$(var ...)"  # skip resolution if there are other substitutions
+            # Skip resolution if there are other substitutions in the package name
+            return "$(var ...)"
+
         try:
             share = get_package_share_directory(pkg)
         except Exception:  # noqa: BLE001
-            issues.append(
-                Issue(
-                    current_file,
-                    f"Cannot resolve package '{pkg}' in find-pkg-share: ",
+            if not isolated_ci:
+                issues.append(
+                    Issue(
+                        current_file,
+                        f"Cannot resolve package '{pkg}' in find-pkg-share: ",
+                    )
                 )
-            )
             return match.group(0)
         return share
 
@@ -341,11 +351,14 @@ def collect_config_references_from_launch(path: Path, data: Any) -> set[Path]:
     return refs
 
 
-def check_launch_semantics(path: Path, data: Any) -> list[Issue]:
+def check_launch_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Issue]:
     """
     Semantic checks for launch YAML:
     - included launch files exist
     - param.from files exist
+
+    When isolated_ci is True, missing file checks are skipped and
+    find-pkg-share resolution failures do not produce errors.
     """
     issues: list[Issue] = []
 
@@ -354,7 +367,9 @@ def check_launch_semantics(path: Path, data: Any) -> list[Issue]:
         if isinstance(include_data, dict):
             file_value = include_data.get("file")
             if isinstance(file_value, str):
-                resolved, extra = resolve_find_pkg_share(file_value, path)
+                resolved, extra = resolve_find_pkg_share(
+                    file_value, path, isolated_ci=isolated_ci
+                )
                 issues.extend(extra)
 
                 # Skip if other substitutions remain (e.g. $(var ...))
@@ -362,7 +377,7 @@ def check_launch_semantics(path: Path, data: Any) -> list[Issue]:
                     continue
 
                 inc_path = make_path_relative_to_file(resolved, path)
-                if not inc_path.is_file():
+                if not inc_path.is_file() and not isolated_ci:
                     suggestion = suggest_similar_path(inc_path)
                     hint = f" (closest match: {suggestion})" if suggestion else ""
                     message = f"Included launch file does not exist: {inc_path}{hint}"
@@ -377,12 +392,14 @@ def check_launch_semantics(path: Path, data: Any) -> list[Issue]:
                         continue
                     from_value = param.get("from")
                     if isinstance(from_value, str):
-                        resolved, extra = resolve_find_pkg_share(from_value, path)
+                        resolved, extra = resolve_find_pkg_share(
+                            from_value, path, isolated_ci=isolated_ci
+                        )
                         issues.extend(extra)
                         if "$(var" in resolved or "$(" in resolved:
                             continue
                         cfg_path = make_path_relative_to_file(resolved, path)
-                        if not cfg_path.is_file():
+                        if not cfg_path.is_file() and not isolated_ci:
                             suggestion = suggest_similar_path(cfg_path)
                             hint = (
                                 f" (closest match: {suggestion})" if suggestion else ""
@@ -397,17 +414,20 @@ def check_launch_semantics(path: Path, data: Any) -> list[Issue]:
     return issues
 
 
-def check_config_semantics(path: Path, data: Any) -> list[Issue]:
+def check_config_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Issue]:
     """
     Semantic checks for config YAML (only for files classified as ROS 2 param configs):
     - referenced files that look like YAML paths must exist
+
+    When isolated_ci is True, missing file checks are skipped and
+    find-pkg-share resolution failures do not produce errors.
     """
     issues: list[Issue] = []
 
     for value in _walk_values(data):
         if not looks_like_path(value):
             continue
-        resolved, extra = resolve_find_pkg_share(value, path)
+        resolved, extra = resolve_find_pkg_share(value, path, isolated_ci=isolated_ci)
         issues.extend(extra)
 
         # Skip if other substitutions remain (e.g. $(var ...))
@@ -415,7 +435,7 @@ def check_config_semantics(path: Path, data: Any) -> list[Issue]:
             continue
 
         cfg_path = make_path_relative_to_file(resolved, path)
-        if not cfg_path.is_file():
+        if not cfg_path.is_file() and not isolated_ci:
             issues.append(Issue(path, f"Referenced file does not exist: {cfg_path}"))
 
     return issues
@@ -491,7 +511,7 @@ def classify_files(files: list[Path]) -> tuple[list[FileInfo], set[Path], list[I
 # --- Main check logic (second pass) ----------------------------------------
 
 
-def check_files(files: list[Path]) -> int:
+def check_files(files: list[Path], isolated_ci: bool = False) -> int:
     if not files:
         print("No YAML files found.", file=sys.stderr)
         return 0
@@ -512,7 +532,7 @@ def check_files(files: list[Path]) -> int:
             all_issues.extend(
                 validate_with_schema(data, LAUNCH_SCHEMA, path, "launch-schema")
             )
-            all_issues.extend(check_launch_semantics(path, data))
+            all_issues.extend(check_launch_semantics(path, data, isolated_ci))
         else:
             # Non-launch YAML
             in_config_dir = is_in_config_dir(path)
@@ -528,7 +548,7 @@ def check_files(files: list[Path]) -> int:
                 all_issues.extend(
                     validate_with_schema(data, CONFIG_SCHEMA, path, "config-schema")
                 )
-                all_issues.extend(check_config_semantics(path, data))
+                all_issues.extend(check_config_semantics(path, data, isolated_ci))
 
     for issue in all_issues:
         print(f"{issue.path}: {issue.kind}: {issue.message}", file=sys.stderr)
@@ -539,7 +559,7 @@ def check_files(files: list[Path]) -> int:
 # --- CLI --------------------------------------------------------------------
 
 
-def parse_args(argv: Optional[list[str]] = None) -> list[str]:
+def parse_args(argv: Optional[list[str]] = None) -> tuple[list[str], bool]:
     parser = argparse.ArgumentParser(
         description="Validate ROS 2 YAML launch and config files using JSON Schema "
         "and semantic checks (file existence)."
@@ -549,17 +569,23 @@ def parse_args(argv: Optional[list[str]] = None) -> list[str]:
         nargs="+",
         help="YAML files or directories containing YAML files",
     )
+    parser.add_argument(
+        "--isolated-ci",
+        action="store_true",
+        help=(
+            "Skip missing-file errors and suppress errors from find-pkg-share "
+            "resolution (useful when running in isolated CI without a full ROS setup)."
+        ),
+    )
     args = parser.parse_args(argv)
-    return args.paths
+    return args.paths, args.isolated_ci
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    paths = parse_args(argv)
+    paths, isolated_ci = parse_args(argv)
     files = collect_files(paths)
-    raise SystemExit(check_files(files))
+    return check_files(files, isolated_ci=isolated_ci)
 
 
 if __name__ == "__main__":
-    paths = ["/home/aljoscha-schmidt/hector/src"]
-    files = collect_files(paths)
-    raise SystemExit(check_files(files))
+    raise SystemExit(main())
