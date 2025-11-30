@@ -6,173 +6,211 @@
   "required": ["launch"],
   "additionalProperties": false,
   "definitions": {
+    "NodeAction": {
+      "type": "object",
+      "required": ["node"],
+      "properties": {
+        "node": {
+          "title": "Node Action Properties",
+          "type": "object",
+          "required": ["pkg", "exec"],
+          "properties": {
+            "pkg": { "type": "string" },
+            "exec": { "type": "string" },
+            "name": { "type": "string" },
+            "namespace": { "type": "string" },
+            "output": { "type": "string" },
+            "respawn": { "type": "string" },
+            "if": { "type": "string" },
+            "unless": { "type": "string" },
+            "args": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+              ]
+            },
+            "param": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "object", "additionalProperties": true }
+                ]
+              }
+            },
+            "remap": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["from", "to"],
+                "properties": {
+                  "from": { "type": "string" },
+                  "to": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "ArgAction": {
+      "type": "object",
+      "required": ["arg"],
+      "properties": {
+        "arg": {
+          "title": "Declare Launch Argument",
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "default": { "type": "string" },
+            "description": { "type": "string" },
+            "if": { "type": "string" },
+            "unless": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "PushNamespaceAction": {
+      "type": "object",
+      "required": ["push_ros_namespace"],
+      "properties": {
+        "push_ros_namespace": {
+          "type": "object",
+          "required": ["namespace"],
+          "properties": {
+            "namespace": { "type": "string" },
+            "if": { "type": "string" },
+            "unless": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "SetRemapAction": {
+      "type": "object",
+      "required": ["set_remap"],
+      "properties": {
+        "set_remap": {
+          "title": "Set Remap Action Properties",
+          "type": "object",
+          "required": ["from", "to"],
+          "properties": {
+            "from": { "type": "string" },
+            "to": { "type": "string" },
+            "if": { "type": "string" },
+            "unless": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IncludeAction": {
+      "type": "object",
+      "required": ["include"],
+      "properties": {
+        "include": {
+          "title": "Include Action Properties",
+          "type": "object",
+          "required": ["file"],
+          "properties": {
+            "file": { "type": "string" },
+            "arg": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "value"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "value": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "if": { "type": "string" },
+            "unless": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "GroupAction": {
+      "type": "object",
+      "required": ["group"],
+      "properties": {
+        "group": {
+          "title": "Group Action Properties",
+          "type": "object",
+          "required": ["actions"],
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/ActionItem" }
+            },
+            "namespace": { "type": "string" },
+            "if": { "type": "string" },
+            "unless": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "LetAction": {
+      "type": "object",
+      "required": ["let"],
+      "properties": {
+        "let": {
+          "title": "Let Action Properties",
+          "type": "object",
+          "required": ["name", "value"],
+          "properties": {
+            "name": { "type": "string" },
+            "value": { "type": "string" },
+            "if": { "type": "string" },
+            "unless": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
     "ActionItem": {
       "title": "Launch Action Item",
       "type": "object",
-      "minProperties": 1,
-      "properties": {
-        "if": {
-          "type": "string"
-        },
-        "unless": {
-          "type": "string"
-        },
-        "elif": {
-          "type": "string"
-        }
-      },
-      "anyOf": [
-        {
-          "required": ["node"],
-          "properties": {
-            "node": {
-              "title": "Node Action Properties",
-              "type": "object",
-              "required": ["pkg", "exec"],
-              "properties": {
-                "pkg": {"type": "string"},
-                "exec": {"type": "string"},
-                "name": {"type": "string"},
-                "namespace": {"type": "string"},
-                "output": {"type": "string"},
-                "respawn": {"type": "string"},
-                "args": {
-                  "oneOf": [
-                    {"type": "string"},
-                    {
-                      "type": "array",
-                      "items": {"type": "string"}
-                    }
-                  ]
-                },
-                "param": {
-                  "type": "array",
-                  "items": {
-                    "oneOf": [
-                      {"type": "string"},
-                      {"type": "object", "additionalProperties": true}
-                    ]
-                  }
-                },
-                "remap": { 
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": ["from", "to"],
-                    "properties": {
-                      "from": {"type": "string"},
-                      "to": {"type": "string"}
-                    },
-                    "additionalProperties": false
-                  }
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": true
-        },
-        {
-          "required": ["arg"],
-          "properties": {
-            "arg": {
-              "title": "Declare Launch Argument",
-              "type": "object",
-              "required": ["name"],
-              "properties": {
-                "name": {"type": "string"},
-                "default": {"type": "string"}
-              },
-              "additionalProperties": true
-            }
-          },
-          "additionalProperties": true
-        },
-        {
-          "required": ["push_ros_namespace"],
-          "properties": {
-            "push_ros_namespace": {
-              "type": "object",
-              "required": ["namespace"],
-              "properties": {
-                "namespace": {"type": "string"}
-              },
-              "additionalProperties": true
-            }
-          },
-          "additionalProperties": true
-        },
-        {
-          "required": ["set_remap"],
-          "properties": {
-            "set_remap": {
-              "title": "Set Remap Action Properties",
-              "type": "object",
-              "required": ["from", "to"],
-              "properties": {
-                "from": {"type": "string"},
-                "to": {"type": "string"}
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": true
-        },
-        {
-          "required": ["include"],
-          "properties": {
-            "include": {
-              "title": "Include Action Properties",
-              "type": "object",
-              "required": ["file"],
-              "properties": {
-                "file": {"type": "string"},
-                "arg": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": ["name", "value"],
-                    "properties": {
-                      "name": {"type": "string"},
-                      "value": {"type": "string"}
-                    },
-                    "additionalProperties": false
-                  }
-                }
-              },
-              "additionalProperties": true
-            }
-          },
-          "additionalProperties": true
-        },
-        {
-          "required": ["group"],
-          "properties": {
-            "group": {
-              "title": "Group Action Properties",
-              "type": "object",
-              "required": ["actions"],
-              "properties": {
-                "actions": {
-                  "type": "array",
-                  "items": {"$ref": "#/definitions/ActionItem"}
-                },
-                "namespace": {"type": "string"}
-              },
-              "additionalProperties": true
-            }
-          },
-          "additionalProperties": true
-        }
+      "oneOf": [
+        { "$ref": "#/definitions/NodeAction" },
+        { "$ref": "#/definitions/ArgAction" },
+        { "$ref": "#/definitions/PushNamespaceAction" },
+        { "$ref": "#/definitions/SetRemapAction" },
+        { "$ref": "#/definitions/IncludeAction" },
+        { "$ref": "#/definitions/GroupAction" },
+        { "$ref": "#/definitions/LetAction" }
       ]
     }
   },
+
   "properties": {
     "launch": {
       "title": "Launch Actions Array",
       "type": "array",
       "minItems": 1,
-      "items": {"$ref": "#/definitions/ActionItem"}
+      "items": { "$ref": "#/definitions/ActionItem" }
     }
   }
 }
