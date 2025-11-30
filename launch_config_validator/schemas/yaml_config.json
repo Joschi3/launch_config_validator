@@ -2,7 +2,7 @@
   "title": "ROS 2 Parameter File Schema (Flexible Root)",
   "description": "A schema for validating ROS 2 YAML parameter files. It allows for multiple top-level keys, including the global wildcard '/**' and specific node names (e.g., 'planner_server'). This supports config files that do not strictly start with '/**'.",
   "$schema": "http://json-schema.org/draft-07/schema#",
-  
+
   "definitions": {
     "NodeParameters": {
       "description": "A set of key-value pairs representing ROS 2 parameters (including nested parameters). Since ROS parameters can be any primitive type, array, or nested object, the structure is kept flexible here.",
@@ -18,7 +18,7 @@
         ]
       }
     },
-    
+
     "NodeConfigContent": {
       "description": "The configuration block (the VALUE) for a specific ROS 2 node, ensuring the mandatory 'ros__parameters' field is present. It also allows for sibling plugin/configuration blocks.",
       "type": "object",
@@ -32,7 +32,7 @@
       "additionalProperties": {
         "description": "Allows for non-standard configuration keys (e.g., plugin-specific configs like 'GridBased', or complex nested structs) that exist as siblings to 'ros__parameters'.",
         "type": "object",
-        "additionalProperties": true 
+        "additionalProperties": true
       }
     },
 
@@ -58,10 +58,10 @@
       "minProperties": 1
     }
   },
-  
+
   "type": "object",
   "minProperties": 1,
-  
+
   "properties": {
     "/**": {
       "description": "The top-level wildcard key (/**).",
