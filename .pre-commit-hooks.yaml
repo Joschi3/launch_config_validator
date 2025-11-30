@@ -1,0 +1,7 @@
+-   id: format-yaml-launch-and-configs
+    name: Format YAML launch and config files
+    description: Format YAML launch and config files
+    entry: launch-config-validator
+    language: python
+    files: \.(ya?ml)$
+    args: [--compare-with-cmake, --auto-fill-missing-deps]
