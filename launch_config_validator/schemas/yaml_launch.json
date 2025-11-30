@@ -21,6 +21,7 @@
             "namespace": { "type": "string" },
             "output": { "type": "string" },
             "respawn": { "type": "string" },
+            "respawn_delay": { "type": "number" },
             "if": { "type": "string" },
             "unless": { "type": "string" },
             "args": {
