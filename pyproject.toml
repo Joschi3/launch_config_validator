@@ -9,6 +9,7 @@ description = "Validates ros2 yaml launch and config files"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "jsonschema"
 ]
 
 [project.scripts]

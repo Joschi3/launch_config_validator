@@ -14,7 +14,7 @@ Features:
     * be referenced from some launch file via node.param[].from
 
 Usage:
-    python3 ros2_yaml_validator.py path1 [path2 ...]
+    python3 validate_launch_config.py path1 [path2 ...]
 """
 
 import argparse

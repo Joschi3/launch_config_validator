@@ -4,4 +4,3 @@
     entry: launch-config-validator
     language: python
     files: \.(ya?ml)$
-    args: [--compare-with-cmake, --auto-fill-missing-deps]
