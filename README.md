@@ -11,9 +11,9 @@ It checks:
 - **Semantic rules**
   - Resolves `$(find-pkg-share pkg)` using `ament_index_python`.
   - Verifies that included launch/config files actually exist.
-  - For YAMLs under `config/` or `configs/`:
-    - each file must either contain a `ros__parameters` block **or**
-    - be referenced from some launch file via `node.param[].from`.
+  - a yaml is considered a standard ros2 config iff
+    - the file contains either a `ros__parameters` block **or**
+    - is referenced from some launch file via `node.param[].from`.
 
 If any error is found, the script exits with status `1` and prints a human-readable message.
 
@@ -51,6 +51,12 @@ Use `--isolated-ci` to **avoid failing on missing files and unresolved packages*
 
 ```bash
 python3 validate_launch_config.py --isolated-ci src/
+```
+
+Use `--verbose` to print every file path being validated:
+
+```bash
+python3 validate_launch_config.py --verbose src/athena_launch
 ```
 
 In this mode:
@@ -249,6 +255,24 @@ Each list entry is exactly one of these actions.
     to: "/athena/tf"
     unless: "$(var use_global_tf)"
 ```
+
+### Supported launch substitutions
+
+In ros2 the following substitutions are currently supported:
+
+| Substitution | Description | Example |
+| --- | --- | --- |
+| `$(find-pkg-share pkg)` | Path to a package's share directory. | `$(find-pkg-share my_robot)/launch/main.launch.yaml` |
+| `$(find-pkg-prefix pkg)` | Path to a package's install root. | `$(find-pkg-prefix my_robot)/bin/tool` |
+| `$(command 'cmd')` | Execute a shell command; replaced with stdout. | `$(command 'xacro $(dirname)/urdf/robot.urdf.xacro')` |
+| `$(var name)` | Value of a declared launch argument. | `$(var use_sim_time)` |
+| `$(env name)` | Environment variable (must exist). | `$(env HOSTNAME)` |
+| `$(env name default)` | Environment variable with a fallback. | `$(env ROBOT_TYPE standard)` |
+| `$(dirname)` | Directory of the current launch file. | `$(dirname)/config/params.yaml` |
+| `$(eval 'expr')` | Python expression evaluation. | `$(eval '2 * 3.14')` |
+| `$(anon name)` | Generates a unique name. | `$(anon my_node)` |
+
+Any other substitution will cause the launch process to fail.
 
 ---
 

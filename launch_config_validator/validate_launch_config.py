@@ -45,6 +45,10 @@ try:
 except ImportError:
     get_package_share_directory = None  # type: ignore
 
+GREEN = "\033[32m"
+RED = "\033[31m"
+RESET = "\033[0m"
+
 
 # --- Duplicate-key-safe YAML loader ----------------------------------------
 
@@ -156,10 +160,41 @@ def contains_ros_parameters(obj: Any) -> bool:
     return False
 
 
+def check_launch_substitutions(path: Path, data: Any) -> list[Issue]:
+    """Ensure only allowed launch substitutions are used in string values."""
+    issues: list[Issue] = []
+    allowed_list = ", ".join(sorted(ALLOWED_LAUNCH_SUBSTITUTIONS))
+    for value in _walk_values(data):
+        if not isinstance(value, str):
+            continue
+        for match in SUBSTITUTION_RE.finditer(value):
+            name = match.group(1)
+            if name not in ALLOWED_LAUNCH_SUBSTITUTIONS:
+                issues.append(
+                    Issue(
+                        path,
+                        f"Unknown launch substitution '{name}' used. Allowed substitutions: {allowed_list}",
+                    )
+                )
+    return issues
+
+
 # --- $(find-pkg-share ...) resolution --------------------------------------
 
 
 FIND_PKG_SHARE_RE = re.compile(r"\$\(\s*find-pkg-share\s+([^)]+?)\s*\)")
+SUBSTITUTION_RE = re.compile(r"\$\(\s*([A-Za-z0-9_-]+)")
+
+ALLOWED_LAUNCH_SUBSTITUTIONS = {
+    "find-pkg-share",
+    "find-pkg-prefix",
+    "command",
+    "var",
+    "env",
+    "dirname",
+    "eval",
+    "anon",
+}
 
 
 def resolve_find_pkg_share(
@@ -356,11 +391,14 @@ def check_launch_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Iss
     Semantic checks for launch YAML:
     - included launch files exist
     - param.from files exist
+    - only allowed launch substitutions are used
 
     When isolated_ci is True, missing file checks are skipped and
     find-pkg-share resolution failures do not produce errors.
     """
     issues: list[Issue] = []
+
+    issues.extend(check_launch_substitutions(path, data))
 
     for _entry, node_data, include_data in iter_launch_entries(data):
         # include.file
@@ -511,12 +549,20 @@ def classify_files(files: list[Path]) -> tuple[list[FileInfo], set[Path], list[I
 # --- Main check logic (second pass) ----------------------------------------
 
 
-def check_files(files: list[Path], isolated_ci: bool = False) -> int:
+def check_files(
+    files: list[Path], isolated_ci: bool = False, verbose: bool = False
+) -> int:
     if not files:
         print("No YAML files found.", file=sys.stderr)
         return 0
 
     all_issues: list[Issue] = []
+
+    if verbose:
+        print(f"Checking {len(files)} YAML files:")
+        for path in files:
+            print(f"- {path}")
+        print()
 
     # First pass: load + classify + collect references
     infos, referenced_config_paths, first_pass_issues = classify_files(files)
@@ -553,13 +599,28 @@ def check_files(files: list[Path], isolated_ci: bool = False) -> int:
     for issue in all_issues:
         print(f"{issue.path}: {issue.kind}: {issue.message}", file=sys.stderr)
 
-    return 1 if any(i.kind == "error" for i in all_issues) else 0
+    num_launch = sum(1 for info in infos if info.is_launch)
+    num_config = sum(1 for info in infos if not info.is_launch)
+    error_count = sum(1 for issue in all_issues if issue.kind == "error")
+    error_files = {issue.path for issue in all_issues if issue.kind == "error"}
+    error_file_count = len(error_files)
+    summary = (
+        f"Checked {num_launch} launch files and {num_config} config files. "
+        f"Found {error_count} errors in {error_file_count} files."
+    )
+
+    if error_count:
+        print(f"{RED}{summary}{RESET}", file=sys.stderr)
+    else:
+        print(f"{GREEN}{summary}{RESET} All good!")
+
+    return 1 if error_count else 0
 
 
 # --- CLI --------------------------------------------------------------------
 
 
-def parse_args(argv: Optional[list[str]] = None) -> tuple[list[str], bool]:
+def parse_args(argv: Optional[list[str]] = None) -> tuple[list[str], bool, bool]:
     parser = argparse.ArgumentParser(
         description="Validate ROS 2 YAML launch and config files using JSON Schema "
         "and semantic checks (file existence)."
@@ -577,14 +638,19 @@ def parse_args(argv: Optional[list[str]] = None) -> tuple[list[str], bool]:
             "resolution (useful when running in isolated CI without a full ROS setup)."
         ),
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print every file path being validated.",
+    )
     args = parser.parse_args(argv)
-    return args.paths, args.isolated_ci
+    return args.paths, args.isolated_ci, args.verbose
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    paths, isolated_ci = parse_args(argv)
+    paths, isolated_ci, verbose = parse_args(argv)
     files = collect_files(paths)
-    return check_files(files, isolated_ci=isolated_ci)
+    return check_files(files, isolated_ci=isolated_ci, verbose=verbose)
 
 
 if __name__ == "__main__":
