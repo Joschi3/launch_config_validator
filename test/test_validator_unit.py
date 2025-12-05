@@ -349,12 +349,55 @@ class ValidatorUnitTests(TestCase):
         self.assertEqual(1, val.check_files(bad_files, isolated_ci=True, verbose=False))
 
     def test_parse_args_and_main_roundtrip(self) -> None:
-        paths, isolated_ci, verbose = val.parse_args(
+        paths, isolated_ci, verbose, auto_isolated_ci = val.parse_args(
             ["foo", "--isolated-ci", "--verbose"]
         )
         self.assertEqual(["foo"], paths)
         self.assertTrue(isolated_ci)
         self.assertTrue(verbose)
+        self.assertTrue(auto_isolated_ci)
 
         exit_code = val.main(["--isolated-ci", "test/examples/correct"])
         self.assertEqual(0, exit_code)
+
+    def test_auto_isolated_ci_triggers_when_ament_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg_dir = self._make_fake_pkg(root, "demo_pkg")
+            launch_dir = pkg_dir / "launch"
+            cfg_dir = pkg_dir / "config"
+            launch_dir.mkdir()
+            cfg_dir.mkdir()
+            launch_file = launch_dir / "auto.launch.yaml"
+            launch_file.write_text(
+                yaml.safe_dump(
+                    {
+                        "launch": [
+                            {
+                                "node": {
+                                    "pkg": "demo_pkg",
+                                    "exec": "demo",
+                                    "param": [
+                                        {
+                                            "from": "$(find-pkg-share demo_pkg)/config/missing.yaml"
+                                        }
+                                    ],
+                                }
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(val, "get_package_share_directory", None),
+                mock.patch.object(val, "get_package_prefix", None),
+            ):
+                result = val.validate_files(
+                    [launch_file], isolated_ci=False, auto_isolated_ci=True
+                )
+
+        self.assertTrue(result.isolated_ci)
+        self.assertTrue(result.auto_isolated_triggered)
+        self.assertEqual(0, result.error_count)

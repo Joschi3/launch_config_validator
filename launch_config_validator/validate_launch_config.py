@@ -154,6 +154,24 @@ def _find_local_package_path(pkg: str, current_file: Path) -> Optional[Path]:
     return None
 
 
+def _effective_isolated_ci(
+    isolated_ci: bool, auto_isolated_ci: bool
+) -> tuple[bool, bool]:
+    """
+    Decide if isolated CI mode should be active. Returns (effective, auto_triggered).
+    If auto_isolated_ci is enabled and ament_index is unavailable, isolated_ci is forced on.
+    """
+    if isolated_ci:
+        return True, False
+    if (
+        auto_isolated_ci
+        and get_package_share_directory is None
+        and get_package_prefix is None
+    ):
+        return True, True
+    return False, False
+
+
 # --- Issue & file metadata --------------------------------------------------
 
 
@@ -178,6 +196,8 @@ class ValidationResult:
     issues: list[Issue]
     num_launch: int
     num_config: int
+    isolated_ci: bool
+    auto_isolated_triggered: bool = False
 
     @property
     def error_files(self) -> set[Path]:
@@ -659,7 +679,10 @@ def classify_files(files: list[Path]) -> tuple[list[FileInfo], set[Path], list[I
 
 
 def check_files(
-    files: list[Path], isolated_ci: bool = False, verbose: bool = False
+    files: list[Path],
+    isolated_ci: bool = False,
+    verbose: bool = False,
+    auto_isolated_ci: bool = True,
 ) -> int:
     if not files:
         print("No YAML files found.", file=sys.stderr)
@@ -671,7 +694,9 @@ def check_files(
             print(f"- {path}")
         print()
 
-    result = validate_files(files, isolated_ci=isolated_ci)
+    result = validate_files(
+        files, isolated_ci=isolated_ci, auto_isolated_ci=auto_isolated_ci
+    )
 
     for issue in result.issues:
         print(f"{issue.path}: {issue.kind}: {issue.message}", file=sys.stderr)
@@ -686,12 +711,23 @@ def check_files(
     else:
         print(f"{GREEN}{summary}{RESET} All good!")
 
+    if result.auto_isolated_triggered:
+        print(
+            "ament_index_python unavailable; auto-enabled --isolated-ci to suppress missing file errors.",
+            file=sys.stderr,
+        )
+
     return 1 if result.error_count else 0
 
 
-def validate_files(files: list[Path], isolated_ci: bool = False) -> ValidationResult:
+def validate_files(
+    files: list[Path], isolated_ci: bool = False, auto_isolated_ci: bool = True
+) -> ValidationResult:
     """Run validation without printing, returning a result object for reuse in tests."""
     all_issues: list[Issue] = []
+    effective_isolated, auto_triggered = _effective_isolated_ci(
+        isolated_ci, auto_isolated_ci
+    )
 
     # First pass: load + classify + collect references
     infos, referenced_config_paths, first_pass_issues = classify_files(files)
@@ -707,7 +743,7 @@ def validate_files(files: list[Path], isolated_ci: bool = False) -> ValidationRe
             all_issues.extend(
                 validate_with_schema(data, LAUNCH_SCHEMA, path, "launch-schema")
             )
-            all_issues.extend(check_launch_semantics(path, data, isolated_ci))
+            all_issues.extend(check_launch_semantics(path, data, effective_isolated))
         else:
             # Non-launch YAML
             in_config_dir = is_in_config_dir(path)
@@ -723,7 +759,9 @@ def validate_files(files: list[Path], isolated_ci: bool = False) -> ValidationRe
                 all_issues.extend(
                     validate_with_schema(data, CONFIG_SCHEMA, path, "config-schema")
                 )
-                all_issues.extend(check_config_semantics(path, data, isolated_ci))
+                all_issues.extend(
+                    check_config_semantics(path, data, effective_isolated)
+                )
 
     num_launch = sum(1 for info in infos if info.is_launch)
     num_config = sum(1 for info in infos if not info.is_launch)
@@ -732,13 +770,17 @@ def validate_files(files: list[Path], isolated_ci: bool = False) -> ValidationRe
         issues=all_issues,
         num_launch=num_launch,
         num_config=num_config,
+        isolated_ci=effective_isolated,
+        auto_isolated_triggered=auto_triggered,
     )
 
 
 # --- CLI --------------------------------------------------------------------
 
 
-def parse_args(argv: Optional[list[str]] = None) -> tuple[list[str], bool, bool]:
+def parse_args(
+    argv: Optional[list[str]] = None,
+) -> tuple[list[str], bool, bool, bool]:
     parser = argparse.ArgumentParser(
         description="Validate ROS 2 YAML launch and config files using JSON Schema "
         "and semantic checks (file existence)."
@@ -761,14 +803,28 @@ def parse_args(argv: Optional[list[str]] = None) -> tuple[list[str], bool, bool]
         action="store_true",
         help="Print every file path being validated.",
     )
+    parser.add_argument(
+        "--auto-isolated-ci",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Automatically enable --isolated-ci when ament_index_python is unavailable "
+            "(default: enabled). Disable with --no-auto-isolated-ci."
+        ),
+    )
     args = parser.parse_args(argv)
-    return args.paths, args.isolated_ci, args.verbose
+    return args.paths, args.isolated_ci, args.verbose, args.auto_isolated_ci
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    paths, isolated_ci, verbose = parse_args(argv)
+    paths, isolated_ci, verbose, auto_isolated_ci = parse_args(argv)
     files = collect_files(paths)
-    return check_files(files, isolated_ci=isolated_ci, verbose=verbose)
+    return check_files(
+        files,
+        isolated_ci=isolated_ci,
+        verbose=verbose,
+        auto_isolated_ci=auto_isolated_ci,
+    )
 
 
 if __name__ == "__main__":
