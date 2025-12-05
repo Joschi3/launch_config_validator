@@ -38,7 +38,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           set +e
-          python3 -m coverage run --source=package_xml_validation \
+          python3 -m coverage run --source=launch_config_validator \
             -m unittest discover -s test -p "test_*.py" -t .
           status=$?
           # Always generate reports so Codecov has something to ingest
