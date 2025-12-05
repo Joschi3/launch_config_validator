@@ -26,8 +26,7 @@ class ValidatorUnitTests(TestCase):
                 "$(find-pkg-share demo_pkg)", dummy, isolated_ci=False
             )
         self.assertEqual("$(find-pkg-share demo_pkg)", resolved)
-        self.assertEqual(1, len(issues))
-        self.assertIn("ament_index_python not available", issues[0].message)
+        self.assertFalse(issues)
 
     def test_resolve_path_substitutions_with_failure_and_var(self) -> None:
         def failing_resolver(_: str) -> str:
@@ -50,6 +49,121 @@ class ValidatorUnitTests(TestCase):
         self.assertIn("Cannot resolve package 'badpkg'", issues[0].message)
         self.assertTrue(var_resolved.startswith("$(var ..."))
         self.assertFalse(var_issues)
+
+    def _make_fake_pkg(self, root: Path, name: str) -> Path:
+        pkg_dir = root / "src" / name
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "package.xml").write_text(
+            f"<package><name>{name}</name></package>", encoding="utf-8"
+        )
+        return pkg_dir
+
+    def test_local_package_resolution_when_ament_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg_dir = self._make_fake_pkg(root, "demo_pkg")
+            launch_dir = pkg_dir / "launch"
+            cfg_dir = pkg_dir / "config"
+            launch_dir.mkdir()
+            cfg_dir.mkdir()
+            cfg_file = cfg_dir / "params.yaml"
+            cfg_file.write_text("{}", encoding="utf-8")
+            launch_path = launch_dir / "main.launch.yaml"
+
+            data = {
+                "launch": [
+                    {
+                        "node": {
+                            "pkg": "demo_pkg",
+                            "exec": "demo",
+                            "param": [
+                                {
+                                    "from": "$(find-pkg-share demo_pkg)/config/params.yaml"
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+            with (
+                mock.patch.object(val, "get_package_share_directory", None),
+                mock.patch.object(val, "get_package_prefix", None),
+            ):
+                issues = val.check_launch_semantics(
+                    launch_path, data, isolated_ci=False
+                )
+            self.assertFalse(issues)
+
+    def test_local_package_resolution_reports_missing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg_dir = self._make_fake_pkg(root, "demo_pkg")
+            launch_dir = pkg_dir / "launch"
+            launch_dir.mkdir()
+            launch_path = launch_dir / "main.launch.yaml"
+
+            data = {
+                "launch": [
+                    {
+                        "node": {
+                            "pkg": "demo_pkg",
+                            "exec": "demo",
+                            "param": [
+                                {
+                                    "from": "$(find-pkg-share demo_pkg)/config/missing.yaml"
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+            with (
+                mock.patch.object(val, "get_package_share_directory", None),
+                mock.patch.object(val, "get_package_prefix", None),
+            ):
+                issues = val.check_launch_semantics(
+                    launch_path, data, isolated_ci=False
+                )
+
+            self.assertTrue(
+                any(
+                    "Parameter file does not exist" in issue.message for issue in issues
+                )
+            )
+
+    def test_local_package_not_found_suppresses_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg_dir = self._make_fake_pkg(root, "demo_pkg")
+            launch_dir = pkg_dir / "launch"
+            launch_dir.mkdir()
+            launch_path = launch_dir / "main.launch.yaml"
+            data = {
+                "launch": [
+                    {
+                        "node": {
+                            "pkg": "other_pkg",
+                            "exec": "demo",
+                            "param": [
+                                {
+                                    "from": "$(find-pkg-share other_pkg)/config/missing.yaml"
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+            with (
+                mock.patch.object(val, "get_package_share_directory", None),
+                mock.patch.object(val, "get_package_prefix", None),
+            ):
+                issues = val.check_launch_semantics(
+                    launch_path, data, isolated_ci=False
+                )
+            self.assertFalse(issues)
 
     def test_suggest_similar_path_and_missing_file_issue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -81,6 +81,79 @@ def load_yaml(path: Path) -> Any:
         return yaml.load(f, Loader=UniqueKeyLoader)
 
 
+def _parse_package_name(package_xml: Path) -> str:
+    """Read the <name> tag from package.xml, falling back to folder name."""
+    try:
+        import xml.etree.ElementTree as ET
+
+        tag = ET.parse(package_xml).find("name")
+        if tag is not None and tag.text:
+            return tag.text.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return package_xml.parent.name
+
+
+def _find_workspace_root(package_dir: Path) -> Optional[Path]:
+    """Return workspace root if it has a src/ containing package_dir."""
+    try:
+        pkg_dir = package_dir.resolve()
+    except OSError:
+        return None
+    for ancestor in (pkg_dir, *pkg_dir.parents):
+        src = ancestor / "src"
+        try:
+            if src.is_dir() and pkg_dir.is_relative_to(src):
+                return ancestor
+        except Exception:
+            continue
+    return None
+
+
+def _find_local_package_path(pkg: str, current_file: Path) -> Optional[Path]:
+    """
+    Locate a package in the current workspace without ament_index.
+    Returns the package directory if found, otherwise None.
+    """
+    start = current_file.resolve()
+    if start.is_file():
+        start = start.parent
+
+    # First, try to find the current package to determine workspace root
+    candidate_pkg_dir: Optional[Path] = None
+    for ancestor in (start, *start.parents):
+        pkg_xml = ancestor / "package.xml"
+        try:
+            if pkg_xml.is_file():
+                candidate_pkg_dir = ancestor
+                break
+        except OSError:
+            continue
+
+    search_root = start
+    if candidate_pkg_dir:
+        ws_root = _find_workspace_root(candidate_pkg_dir)
+        if ws_root:
+            search_root = ws_root / "src"
+        else:
+            search_root = candidate_pkg_dir.parent
+
+    try:
+        for xml in search_root.rglob("package.xml"):
+            if "build" in xml.parts or "install" in xml.parts:
+                continue
+            try:
+                name = _parse_package_name(xml)
+            except Exception:
+                name = xml.parent.name
+            if name == pkg:
+                return xml.parent.resolve()
+    except OSError:
+        return None
+
+    return None
+
+
 # --- Issue & file metadata --------------------------------------------------
 
 
@@ -243,24 +316,21 @@ def resolve_path_substitutions(
             if kind == "find-pkg-share"
             else get_package_prefix
         )
-        if resolver is None:
-            if isolated_ci:
-                return match.group(0)
-            issues.append(
-                Issue(
-                    current_file,
-                    f"Cannot resolve {kind}('{pkg}'): "
-                    "ament_index_python not available (ROS env not sourced?)",
-                )
-            )
-            return match.group(0)
-
         if "$" in pkg:
             return "$(var ...)"
 
+        if resolver is None:
+            fallback_path = _find_local_package_path(pkg, current_file)
+            # ament_index not available; only use local package discovery
+            return str(fallback_path) if fallback_path else match.group(0)
+
         try:
             path = resolver(pkg)
+            return path
         except Exception:  # noqa: BLE001
+            fallback_path = _find_local_package_path(pkg, current_file)
+            if fallback_path:
+                return str(fallback_path)
             if not isolated_ci:
                 issues.append(
                     Issue(
@@ -269,7 +339,6 @@ def resolve_path_substitutions(
                     )
                 )
             return match.group(0)
-        return path
 
     resolved = FIND_PKG_RE.sub(repl_pkg, expr)
 
