@@ -1,0 +1,7 @@
+launch:
+  - node:
+      pkg: "demo_pkg"
+      exec: "talker"
+      name: "demo_talker"
+      param:
+        - from: "../config/valid_params.yaml"

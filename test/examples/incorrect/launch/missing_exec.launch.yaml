@@ -1,0 +1,6 @@
+launch:
+  - node:
+      pkg: "demo_pkg"
+      name: "missing_exec_node"
+      param:
+        - from: "../config/missing_ros_parameters.yaml"

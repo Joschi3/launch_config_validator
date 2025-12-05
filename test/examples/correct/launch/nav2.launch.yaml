@@ -1,0 +1,140 @@
+launch:
+- arg:
+    name: namespace
+    default: ""
+- push_ros_namespace:
+    namespace: "$(var namespace)"
+
+- set_remap:
+    from: "/tf"
+    to: "tf"
+- set_remap:
+    from: "/tf_static"
+    to: "tf_static"
+
+# Spin up lifecycle nodes
+- node:
+    pkg: "nav2_lifecycle_manager"
+    exec: "lifecycle_manager"
+    name: "lifecycle_manager"
+    output: "screen"
+    respawn: "true"
+    param:
+        - from: $(find-pkg-share athena_software_launch)/configs/navigation/nav2_config.yaml
+          allow_substs: true
+
+# Local path follower
+- node:
+    pkg: "nav2_controller"
+    exec: "controller_server"
+    name: "controller_server"
+    output: "screen"
+    respawn: "true"
+    param:
+        - from: $(find-pkg-share athena_software_launch)/configs/navigation/nav2_config.yaml
+          allow_substs: true
+
+- node:
+    pkg: "topic_tools"
+    exec: "relay"
+    name: "local_costmap_back_lidar_relay"
+    output: "screen"
+    respawn: "true"
+    param:
+        - name: input_topic
+          value: back_lidar/self_filter/filtered
+        - name: output_topic
+          value: local_costmap/back_lidar/self_filter/filtered
+
+- node:
+    pkg: "topic_tools"
+    exec: "relay"
+    name: "local_costmap_front_lidar_relay"
+    output: "screen"
+    respawn: "true"
+    param:
+        - name: input_topic
+          value: front_lidar/self_filter/filtered
+        - name: output_topic
+          value: local_costmap/front_lidar/self_filter/filtered
+
+# Global path planner
+- node:
+    pkg: "nav2_planner"
+    exec: "planner_server"
+    name: "planner_server"
+    output: "screen"
+    respawn: "true"
+    param:
+        - from: $(find-pkg-share athena_software_launch)/configs/navigation/nav2_config.yaml
+          allow_substs: true
+
+- node:
+    pkg: "topic_tools"
+    exec: "relay"
+    name: "global_costmap_back_lidar_relay"
+    output: "screen"
+    respawn: "true"
+    param:
+        - name: input_topic
+          value: back_lidar/self_filter/filtered
+        - name: output_topic
+          value: global_costmap/back_lidar/self_filter/filtered
+
+- node:
+    pkg: "topic_tools"
+    exec: "relay"
+    name: "global_costmap_front_lidar_relay"
+    output: "screen"
+    respawn: "true"
+    param:
+        - name: input_topic
+          value: front_lidar/self_filter/filtered
+        - name: output_topic
+          value: global_costmap/front_lidar/self_filter/filtered
+
+- node:
+    pkg: "topic_tools"
+    exec: "relay"
+    name: "global_occupancy_grid_map_relay"
+    output: "screen"
+    respawn: "true"
+    param:
+      - name: input_topic
+        value: occupancy_grid_map
+      - name: output_topic
+        value: global_costmap/occupancy_grid_map
+
+- node:
+    pkg: "topic_tools"
+    exec: "relay"
+    name: "local_occupancy_grid_map_relay"
+    output: "screen"
+    respawn: "true"
+    param:
+      - name: input_topic
+        value: occupancy_grid_map
+      - name: output_topic
+        value: local_costmap/occupancy_grid_map
+
+# Behavior Tree interface
+- node:
+    pkg: "nav2_bt_navigator"
+    exec: "bt_navigator"
+    name: "bt_navigator"
+    output: "screen"
+    respawn: "true"
+    param:
+        - from: $(find-pkg-share athena_software_launch)/configs/navigation/nav2_config.yaml
+          allow_substs: true
+
+# Behavior
+- node:
+    pkg: "nav2_behaviors"
+    exec: "behavior_server"
+    name: "behavior_server"
+    output: "screen"
+    respawn: "true"
+    param:
+        - from: $(find-pkg-share athena_software_launch)/configs/navigation/nav2_config.yaml
+          allow_substs: true

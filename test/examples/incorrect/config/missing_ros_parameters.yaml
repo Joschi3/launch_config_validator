@@ -1,0 +1,2 @@
+my_node:
+  some_key: "not a valid config block"

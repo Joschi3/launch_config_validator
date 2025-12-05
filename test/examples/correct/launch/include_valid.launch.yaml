@@ -1,0 +1,8 @@
+launch:
+  - include:
+      file: "$(dirname)/child.launch.yaml"
+
+  - node:
+      pkg: "demo_pkg"
+      exec: "talker"
+      name: "valid_node_with_include"

@@ -1,0 +1,6 @@
+launch:
+  - node:
+      exec: "talker"
+      name: "config_missing_ros_params"
+      param:
+        - from: "../config/nav2_missing_ros_parameters.yaml"

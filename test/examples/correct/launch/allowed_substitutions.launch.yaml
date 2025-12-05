@@ -1,0 +1,18 @@
+launch:
+  - arg:
+      name: config_dir
+      default: "$(dirname)"
+
+  - include:
+      file: "$(find-pkg-share demo_pkg)/launch/child.launch.yaml"
+      arg:
+        - name: "use_sim_time"
+          value: "true"
+
+  - node:
+      pkg: "demo_pkg"
+      exec: "listener"
+      name: "demo_listener"
+      param:
+        - from: "$(find-pkg-prefix demo_pkg)/share/demo_pkg/config/valid_params.yaml"
+        - from: "$(dirname)/../config/valid_params.yaml"

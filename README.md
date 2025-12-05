@@ -1,23 +1,54 @@
+![CI](https://github.com/Joschi3/launch_config_validator/actions/workflows/unittests.yml/badge.svg)
+![Lint](https://github.com/Joschi3/launch_config_validator/actions/workflows/lint.yml/badge.svg)
+[![codecov](https://codecov.io/gh/Joschi3/launch_config_validator/branch/main/graph/badge.svg)](https://codecov.io/gh/Joschi3/launch_config_validator/)
 # ROS 2 YAML Launch & Config Validator
 
-This tool validates ROS 2 YAML **launch files** and **parameter configs**.
+This tool validates ROS 2 YAML **launch files** and **parameter configuration files**.
+It performs both structural checks (YAML, schema) and semantic checks (package lookup, referenced file existence).
 
-It checks:
+## What the Validator Checks
 
-- **YAML syntax & structure**
-  - Parses YAML with a duplicate-key–safe loader (fails on repeated keys).
-  - Validates launch files against `schemas/yaml_launch.json`.
-  - Validates parameter configs against `schemas/yaml_config.json`.
-- **Semantic rules**
-  - Resolves `$(find-pkg-share pkg)` using `ament_index_python`.
-  - Verifies that included launch/config files actually exist.
-  - a yaml is considered a standard ros2 config iff
-    - the file contains either a `ros__parameters` block **or**
-    - is referenced from some launch file via `node.param[].from`.
+### 1. YAML Syntax & Structure
 
-If any error is found, the script exits with status `1` and prints a human-readable message.
+* Parses YAML using a duplicate-key–safe loader (errors on repeated keys).
+* Validates **launch files** against `schemas/yaml_launch.json`.
+* Validates **ROS parameter config files** against `schemas/yaml_config.json`.
 
----
+
+### 2. Resolution of Referenced Files
+
+The validator expands ROS-specific path expressions and verifies that the resulting files exist.
+
+Supported patterns:
+
+* **`$(find-pkg-share pkg)`**
+  → resolved via `get_package_share_directory(pkg)` from `ament_index_python`
+
+* **`$(find-pkg-prefix pkg)`**
+  → resolved via `get_package_prefix(pkg)` from `ament_index_python`
+
+* **`$(dirname)`** *(discouraged)*
+  This expands to the directory of the *launch file currently being validated*.
+  It should be avoided in ROS 2 YAML files in favor of `$(find-pkg-share ...)`.
+
+
+
+### 3. Classification of ROS 2 Config Files
+
+A YAML file is treated as a **valid ROS 2 parameter config** if **at least one** of the following holds:
+
+1. It contains a top-level `ros__parameters` block.
+2. It is referenced in a launch file via a `node.param[].from` entry.
+
+
+
+### 4. Error Handling
+
+If any issue is detected—invalid YAML structure, schema violations, unresolved substitutions, missing files—the validator:
+
+* prints a concise, human-readable error report,
+* exits with status **1**.
+
 
 ## Usage
 

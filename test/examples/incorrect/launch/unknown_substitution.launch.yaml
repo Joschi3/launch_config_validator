@@ -1,0 +1,7 @@
+launch:
+  - node:
+      pkg: "demo_pkg"
+      exec: "talker"
+      name: "unknown_substitution_node"
+      param:
+        - from: "$(unknown-subst demo_pkg)/config/broken.yaml"

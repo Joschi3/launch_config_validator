@@ -41,9 +41,13 @@ except ImportError:
     sys.exit(2)
 
 try:
-    from ament_index_python.packages import get_package_share_directory
+    from ament_index_python.packages import (
+        get_package_prefix,
+        get_package_share_directory,
+    )
 except ImportError:
     get_package_share_directory = None  # type: ignore
+    get_package_prefix = None  # type: ignore
 
 GREEN = "\033[32m"
 RED = "\033[31m"
@@ -94,6 +98,25 @@ class FileInfo:
     is_launch: bool
     contains_ros_params: bool
     is_param_config: bool = False  # filled in second pass
+
+
+@dataclass
+class ValidationResult:
+    issues: list[Issue]
+    num_launch: int
+    num_config: int
+
+    @property
+    def error_files(self) -> set[Path]:
+        return {issue.path for issue in self.issues if issue.kind == "error"}
+
+    @property
+    def error_count(self) -> int:
+        return sum(1 for issue in self.issues if issue.kind == "error")
+
+    @property
+    def error_file_count(self) -> int:
+        return len(self.error_files)
 
 
 # --- JSON Schemas -----------------------------------------------------------
@@ -182,7 +205,8 @@ def check_launch_substitutions(path: Path, data: Any) -> list[Issue]:
 # --- $(find-pkg-share ...) resolution --------------------------------------
 
 
-FIND_PKG_SHARE_RE = re.compile(r"\$\(\s*find-pkg-share\s+([^)]+?)\s*\)")
+FIND_PKG_RE = re.compile(r"\$\(\s*(find-pkg-share|find-pkg-prefix)\s+([^)]+?)\s*\)")
+DIRNAME_RE = re.compile(r"\$\(\s*dirname\s*\)")
 SUBSTITUTION_RE = re.compile(r"\$\(\s*([A-Za-z0-9_-]+)")
 
 ALLOWED_LAUNCH_SUBSTITUTIONS = {
@@ -197,55 +221,69 @@ ALLOWED_LAUNCH_SUBSTITUTIONS = {
 }
 
 
-def resolve_find_pkg_share(
+def resolve_path_substitutions(
     expr: str, current_file: Path, isolated_ci: bool = False
 ) -> tuple[str, list[Issue]]:
     """
-    Replace $(find-pkg-share pkg_name) with the actual share directory.
+    Replace known path substitutions:
+    - $(find-pkg-share pkg)
+    - $(find-pkg-prefix pkg)
+    - $(dirname)
     Returns (resolved_string, issues).
 
-    If isolated_ci is True, failures to resolve do NOT produce issues.
+    If isolated_ci is True, failures to resolve packages do NOT produce issues.
     """
     issues: list[Issue] = []
 
-    def repl(match: re.Match) -> str:
-        pkg = match.group(1).strip()
-        if get_package_share_directory is None:
+    def repl_pkg(match: re.Match) -> str:
+        kind = match.group(1)
+        pkg = match.group(2).strip()
+        resolver = (
+            get_package_share_directory
+            if kind == "find-pkg-share"
+            else get_package_prefix
+        )
+        if resolver is None:
             if isolated_ci:
-                # keep original; caller will see unresolved '$(' and skip existence check
                 return match.group(0)
             issues.append(
                 Issue(
                     current_file,
-                    f"Cannot resolve find-pkg-share('{pkg}'): "
+                    f"Cannot resolve {kind}('{pkg}'): "
                     "ament_index_python not available (ROS env not sourced?)",
                 )
             )
             return match.group(0)
 
         if "$" in pkg:
-            # Skip resolution if there are other substitutions in the package name
             return "$(var ...)"
 
         try:
-            share = get_package_share_directory(pkg)
+            path = resolver(pkg)
         except Exception:  # noqa: BLE001
             if not isolated_ci:
                 issues.append(
                     Issue(
                         current_file,
-                        f"Cannot resolve package '{pkg}' in find-pkg-share: ",
+                        f"Cannot resolve package '{pkg}' in {kind}: ",
                     )
                 )
             return match.group(0)
-        return share
+        return path
 
-    resolved = FIND_PKG_SHARE_RE.sub(repl, expr)
+    resolved = FIND_PKG_RE.sub(repl_pkg, expr)
+
+    if DIRNAME_RE.search(resolved):
+        resolved = DIRNAME_RE.sub(str(current_file.parent), resolved)
+
     return resolved, issues
 
 
 def looks_like_path(value: str) -> bool:
-    if "$(find-pkg-share" in value:
+    if any(
+        marker in value
+        for marker in ("$(find-pkg-share", "$(find-pkg-prefix", "$(dirname)")
+    ):
         return True
     if any(value.endswith(suf) for suf in [".yaml", ".yml"]):
         return True
@@ -375,7 +413,7 @@ def collect_config_references_from_launch(path: Path, data: Any) -> set[Path]:
             from_value = param.get("from")
             if not isinstance(from_value, str):
                 continue
-            resolved, _ = resolve_find_pkg_share(from_value, path)
+            resolved, _ = resolve_path_substitutions(from_value, path, isolated_ci=True)
             # For classification we don't care if resolution fails; we still
             # get a path relative to the launch file.
             if "$(var" in resolved or "$(" in resolved:
@@ -405,7 +443,7 @@ def check_launch_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Iss
         if isinstance(include_data, dict):
             file_value = include_data.get("file")
             if isinstance(file_value, str):
-                resolved, extra = resolve_find_pkg_share(
+                resolved, extra = resolve_path_substitutions(
                     file_value, path, isolated_ci=isolated_ci
                 )
                 issues.extend(extra)
@@ -430,7 +468,7 @@ def check_launch_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Iss
                         continue
                     from_value = param.get("from")
                     if isinstance(from_value, str):
-                        resolved, extra = resolve_find_pkg_share(
+                        resolved, extra = resolve_path_substitutions(
                             from_value, path, isolated_ci=isolated_ci
                         )
                         issues.extend(extra)
@@ -465,7 +503,9 @@ def check_config_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Iss
     for value in _walk_values(data):
         if not looks_like_path(value):
             continue
-        resolved, extra = resolve_find_pkg_share(value, path, isolated_ci=isolated_ci)
+        resolved, extra = resolve_path_substitutions(
+            value, path, isolated_ci=isolated_ci
+        )
         issues.extend(extra)
 
         # Skip if other substitutions remain (e.g. $(var ...))
@@ -556,13 +596,33 @@ def check_files(
         print("No YAML files found.", file=sys.stderr)
         return 0
 
-    all_issues: list[Issue] = []
-
     if verbose:
         print(f"Checking {len(files)} YAML files:")
         for path in files:
             print(f"- {path}")
         print()
+
+    result = validate_files(files, isolated_ci=isolated_ci)
+
+    for issue in result.issues:
+        print(f"{issue.path}: {issue.kind}: {issue.message}", file=sys.stderr)
+
+    summary = (
+        f"Checked {result.num_launch} launch files and {result.num_config} config files. "
+        f"Found {result.error_count} errors in {result.error_file_count} files."
+    )
+
+    if result.error_count:
+        print(f"{RED}{summary}{RESET}", file=sys.stderr)
+    else:
+        print(f"{GREEN}{summary}{RESET} All good!")
+
+    return 1 if result.error_count else 0
+
+
+def validate_files(files: list[Path], isolated_ci: bool = False) -> ValidationResult:
+    """Run validation without printing, returning a result object for reuse in tests."""
+    all_issues: list[Issue] = []
 
     # First pass: load + classify + collect references
     infos, referenced_config_paths, first_pass_issues = classify_files(files)
@@ -596,25 +656,14 @@ def check_files(
                 )
                 all_issues.extend(check_config_semantics(path, data, isolated_ci))
 
-    for issue in all_issues:
-        print(f"{issue.path}: {issue.kind}: {issue.message}", file=sys.stderr)
-
     num_launch = sum(1 for info in infos if info.is_launch)
     num_config = sum(1 for info in infos if not info.is_launch)
-    error_count = sum(1 for issue in all_issues if issue.kind == "error")
-    error_files = {issue.path for issue in all_issues if issue.kind == "error"}
-    error_file_count = len(error_files)
-    summary = (
-        f"Checked {num_launch} launch files and {num_config} config files. "
-        f"Found {error_count} errors in {error_file_count} files."
+
+    return ValidationResult(
+        issues=all_issues,
+        num_launch=num_launch,
+        num_config=num_config,
     )
-
-    if error_count:
-        print(f"{RED}{summary}{RESET}", file=sys.stderr)
-    else:
-        print(f"{GREEN}{summary}{RESET} All good!")
-
-    return 1 if error_count else 0
 
 
 # --- CLI --------------------------------------------------------------------

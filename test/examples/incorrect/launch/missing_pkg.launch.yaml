@@ -1,0 +1,4 @@
+launch:
+  - node:
+      exec: "talker"
+      name: "missing_pkg"
