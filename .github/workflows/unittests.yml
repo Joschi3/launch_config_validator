@@ -40,7 +40,7 @@ jobs:
         run: |
           set +e
           python3 -m coverage run --source=package_xml_validation \
-            -m unittest discover -s tests -p "test_*.py" -t .
+            -m unittest discover -s test -p "test_*.py" -t .
           status=$?
           # Always generate reports so Codecov has something to ingest
           python3 -m coverage xml -o coverage.xml || true
