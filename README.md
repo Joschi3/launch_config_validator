@@ -105,12 +105,12 @@ The repository includes a pre-commit hook that runs this validator automatically
 `.pre-commit-config.yaml` snippet:
 
 ```yaml
--   id: format-yaml-launch-and-configs
-    name: Format YAML launch and config files
-    description: Format YAML launch and config files
-    entry: launch-config-validator
-    language: python
-    files: \.(ya?ml)$
+  # YAML launch and config files
+  - repo: https://github.com/Joschi3/launch_config_validator.git
+    rev: v0.1.2
+    hooks:
+      - id: format-yaml-launch-and-configs
+        name: Validate ROS2 launch and config YAML files
 ```
 
 ### How it works

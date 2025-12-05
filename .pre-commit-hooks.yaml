@@ -4,3 +4,4 @@
     entry: launch-config-validator
     language: python
     files: \.(ya?ml)$
+    args: [--auto-isolated-ci]
