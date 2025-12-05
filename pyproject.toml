@@ -15,3 +15,6 @@ dependencies = [
 
 [project.scripts]
 launch-config-validator = "launch_config_validator.validate_launch_config:main"
+
+[tool.setuptools.package-data]
+launch_config_validator = ["schemas/*.json"]
