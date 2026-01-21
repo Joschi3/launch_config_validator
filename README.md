@@ -107,7 +107,7 @@ The repository includes a pre-commit hook that runs this validator automatically
 ```yaml
   # YAML launch and config files
   - repo: https://github.com/Joschi3/launch_config_validator.git
-    rev: v0.1.2
+    rev: v0.1.3 # Use the most recent tag
     hooks:
       - id: format-yaml-launch-and-configs
         name: Validate ROS2 launch and config YAML files
