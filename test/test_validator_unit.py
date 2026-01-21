@@ -1,5 +1,6 @@
 import json
 import tempfile
+import textwrap
 from pathlib import Path
 from unittest import mock, TestCase
 
@@ -347,6 +348,32 @@ class ValidatorUnitTests(TestCase):
 
         bad_files = val.collect_files(["test/examples/incorrect"])
         self.assertEqual(1, val.check_files(bad_files, isolated_ci=True, verbose=False))
+
+    def test_hector_launch_manager_files_are_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            launch_dir = Path(tmp) / "launch"
+            launch_dir.mkdir()
+            hector_file = launch_dir / "hector_components.yaml"
+            hector_file.write_text(
+                textwrap.dedent(
+                    """
+                                    description: A very simple node
+                                    launch:
+                                        package: simple_node
+                                        executable: simple_node
+                                        arguments: simple_arg
+                                    """
+                ).strip(),
+                encoding="utf-8",
+            )
+
+            result = val.validate_files(
+                [hector_file], isolated_ci=False, auto_isolated_ci=False
+            )
+
+        self.assertEqual(0, result.error_count)
+        self.assertEqual(0, result.num_launch)
+        self.assertEqual(0, result.num_config)
 
     def test_parse_args_and_main_roundtrip(self) -> None:
         paths, isolated_ci, verbose, auto_isolated_ci = val.parse_args(
