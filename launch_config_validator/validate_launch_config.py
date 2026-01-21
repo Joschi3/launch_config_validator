@@ -230,15 +230,25 @@ with open(
 # --- Helpers for classification & traversal ---------------------------------
 
 
-def is_launch_data(data: Any) -> bool:
-    return isinstance(data, dict) and "launch" in data
-
-
 def is_launch_file(path: Path, data: Any) -> bool:
-    # Heuristic: name contains "launch" or content has "launch" key
-    if "launch" in path.name:
-        return True
-    return is_launch_data(data)
+    # The file is a launch file if:
+    # - it has no "description" field at the top level, AND
+    # - it has a "launch" field at the top level, AND
+    # - the "launch" field does not contain a "launch_file" field, AND
+    # - any part of the path is named "launch" (folder) OR the filename contains "launch"
+
+    if not isinstance(data, dict):
+        return False
+    if "description" in data:
+        return False
+    if "launch" not in data:
+        return False
+    launch_section = data.get("launch")
+    if isinstance(launch_section, dict) and "launch_file" in launch_section:
+        return False
+
+    path = path.absolute()
+    return "launch" in path.parts or ".launch" in path.name or "_launch" in path.name
 
 
 def is_config_file(path: Path, data: Any) -> bool:
@@ -764,7 +774,7 @@ def validate_files(
                 )
 
     num_launch = sum(1 for info in infos if info.is_launch)
-    num_config = sum(1 for info in infos if not info.is_launch)
+    num_config = sum(1 for info in infos if info.is_param_config)
 
     return ValidationResult(
         issues=all_issues,
