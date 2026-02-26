@@ -428,3 +428,48 @@ class ValidatorUnitTests(TestCase):
         self.assertTrue(result.isolated_ci)
         self.assertTrue(result.auto_isolated_triggered)
         self.assertEqual(0, result.error_count)
+
+    def test_local_source_preferred_over_install_path(self) -> None:
+        """When ament resolves to an install path but the package exists in the
+        local workspace src/, the source path should be preferred."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg_dir = self._make_fake_pkg(root, "demo_pkg")
+            launch_dir = pkg_dir / "launch"
+            cfg_dir = pkg_dir / "config"
+            launch_dir.mkdir()
+            cfg_dir.mkdir()
+            cfg_file = cfg_dir / "params.yaml"
+            cfg_file.write_text("{}", encoding="utf-8")
+            launch_path = launch_dir / "main.launch.yaml"
+
+            # Simulate ament returning an install path where the file does NOT exist
+            install_share = root / "install" / "demo_pkg" / "share" / "demo_pkg"
+            install_share.mkdir(parents=True)
+
+            data = {
+                "launch": [
+                    {
+                        "node": {
+                            "pkg": "demo_pkg",
+                            "exec": "demo",
+                            "param": [
+                                {
+                                    "from": "$(find-pkg-share demo_pkg)/config/params.yaml"
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+            with mock.patch.object(
+                val,
+                "get_package_share_directory",
+                return_value=str(install_share),
+            ):
+                issues = val.check_launch_semantics(
+                    launch_path, data, isolated_ci=False
+                )
+            # Should find the file in src/, not report it missing from install/
+            self.assertFalse(issues)

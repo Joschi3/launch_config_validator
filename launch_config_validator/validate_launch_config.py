@@ -356,6 +356,10 @@ def resolve_path_substitutions(
 
         try:
             path = resolver(pkg)
+            # Prefer source path over install path for local workspace packages
+            local_path = _find_local_package_path(pkg, current_file)
+            if local_path:
+                return str(local_path)
             return path
         except Exception:  # noqa: BLE001
             fallback_path = _find_local_package_path(pkg, current_file)
