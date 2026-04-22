@@ -1,0 +1,9 @@
+launch:
+  - node_container:
+      pkg: "rclcpp_components"
+      exec: "component_container"
+      name: "my_container"
+      composable_node:
+        - pkg: "image_tools"
+          # missing required 'plugin'
+          name: "cam2image"

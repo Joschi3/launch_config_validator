@@ -1,0 +1,7 @@
+launch:
+  - load_composable_node:
+      # missing required 'target'
+      composable_node:
+        - pkg: "image_tools"
+          plugin: "image_tools::ShowImage"
+          name: "showimage"

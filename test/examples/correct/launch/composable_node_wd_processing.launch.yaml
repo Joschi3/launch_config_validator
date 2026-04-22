@@ -1,0 +1,57 @@
+launch:
+- arg:
+    name: "camera_name"
+    default: "wideangle"
+- arg:
+    name: "calibration_name"
+    default: "wideangle"
+- arg:
+    name: "projection_name"
+    default: "pinhole_front"
+- arg:
+    name: "projection_center"
+    default: "base_link"
+- arg:
+    name: "ros_namespace"
+    default: ""
+
+# load into container
+- load_composable_node:
+      target: "$(var ros_namespace)/image_projection_container"
+      composable_node:
+        - pkg: image_projection
+          plugin: image_projection::PeriodicImageProjectionNode
+          name: "image_projection_$(var projection_name)"
+          param:
+          - name: "base_frame"
+            value: "$(var projection_center)"
+          - from: "$(find-pkg-share athena_driver_launch)/configs/calibrations/$(var calibration_name)/$(var camera_name)_params.yaml"
+          - from: "$(find-pkg-share athena_driver_launch)/configs/wideangle_projection/$(var projection_name)_projection_params.yaml"
+          - name: "virtual_sensor_frame"
+            value: "$(var projection_name)_frame"
+          - name: "virtual_sensor_optical_frame"
+            value: "$(var projection_name)_optical_frame"
+          - name: "encoding"
+            value: "rgb8"
+          - name : "$(var camera_name).image_transport"
+            value: "raw"
+          remap:
+          - from: "projection"
+            to: "$(var camera_name)/$(var projection_name)/image_rect_color"
+          - from: "camera_info"
+            to: "$(var camera_name)/$(var projection_name)/camera_info"
+          - from: "set_pose"
+            to: "$(var camera_name)/$(var projection_name)/set_pose"
+          - from: "set_transform"
+            to: "$(var camera_name)/$(var projection_name)/set_transform"
+          - from: "projection/compressed"
+            to: "$(var camera_name)/$(var projection_name)/image_rect_color/compressed"
+          - from: "projection/compressedDepth"
+            to: "$(var camera_name)/$(var projection_name)/image_rect_color/compressedDepth"
+          - from: "projection/theora"
+            to: "$(var camera_name)/$(var projection_name)/image_rect_color/theora"
+          - from: "projection/zstd"
+            to: "$(var camera_name)/$(var projection_name)/image_rect_color/zstd"
+          extra_arg:
+            - name: use_intra_process_comms
+              value: "true"

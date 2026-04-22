@@ -496,26 +496,55 @@ def iter_launch_entries(data: Any):
 # --- Semantic checks & reference collection ---------------------------------
 
 
+def _iter_param_from_values(entry: dict) -> list[str]:
+    """
+    Yield every `from` string found in the param[] list of any action type
+    (node / node_container / load_composable_node, including nested composable_node).
+    """
+    results: list[str] = []
+
+    def collect_params(params: Any) -> None:
+        if not isinstance(params, list):
+            return
+        for param in params:
+            if isinstance(param, dict):
+                from_value = param.get("from")
+                if isinstance(from_value, str):
+                    results.append(from_value)
+
+    def collect_composable_list(cnodes: Any) -> None:
+        if not isinstance(cnodes, list):
+            return
+        for cn in cnodes:
+            if isinstance(cn, dict):
+                collect_params(cn.get("param"))
+
+    node_data = entry.get("node")
+    if isinstance(node_data, dict):
+        collect_params(node_data.get("param"))
+
+    container_data = entry.get("node_container")
+    if isinstance(container_data, dict):
+        collect_params(container_data.get("param"))
+        collect_composable_list(container_data.get("composable_node"))
+
+    load_data = entry.get("load_composable_node")
+    if isinstance(load_data, dict):
+        collect_composable_list(load_data.get("composable_node"))
+
+    return results
+
+
 def collect_config_references_from_launch(path: Path, data: Any) -> set[Path]:
     """
-    Collect config file paths referenced from a launch file via node.param[].from.
+    Collect config file paths referenced from a launch file via any param[].from
+    entry (nodes, containers, or composable nodes).
     This is used only to classify config files (whether they're referenced at all).
     """
     refs: set[Path] = set()
 
-    for _entry, node_data, _include_data in iter_launch_entries(data):
-        if not isinstance(node_data, dict):
-            continue
-        params = node_data.get("param")
-        if not isinstance(params, list):
-            continue
-
-        for param in params:
-            if not isinstance(param, dict):
-                continue
-            from_value = param.get("from")
-            if not isinstance(from_value, str):
-                continue
+    for entry, _, _ in iter_launch_entries(data):
+        for from_value in _iter_param_from_values(entry):
             resolved, _ = resolve_path_substitutions(from_value, path, isolated_ci=True)
             # For classification we don't care if resolution fails; we still
             # get a path relative to the launch file.
@@ -541,7 +570,7 @@ def check_launch_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Iss
 
     issues.extend(check_launch_substitutions(path, data))
 
-    for _entry, node_data, include_data in iter_launch_entries(data):
+    for entry, _, include_data in iter_launch_entries(data):
         # include.file
         if isinstance(include_data, dict):
             file_value = include_data.get("file")
@@ -562,33 +591,24 @@ def check_launch_semantics(path: Path, data: Any, isolated_ci: bool) -> list[Iss
                     message = f"Included launch file does not exist: {inc_path}{hint}"
                     issues.append(Issue(path, message))
 
-        # node.param.from
-        if isinstance(node_data, dict):
-            params = node_data.get("param")
-            if isinstance(params, list):
-                for param in params:
-                    if not isinstance(param, dict):
-                        continue
-                    from_value = param.get("from")
-                    if isinstance(from_value, str):
-                        resolved, extra = resolve_path_substitutions(
-                            from_value, path, isolated_ci=isolated_ci
-                        )
-                        issues.extend(extra)
-                        if "$(var" in resolved or "$(" in resolved:
-                            continue
-                        cfg_path = make_path_relative_to_file(resolved, path)
-                        if not cfg_path.is_file() and not isolated_ci:
-                            suggestion = suggest_similar_path(cfg_path)
-                            hint = (
-                                f" (closest match: {suggestion})" if suggestion else ""
-                            )
-                            issues.append(
-                                Issue(
-                                    path,
-                                    f"Parameter file does not exist: {cfg_path}{hint}",
-                                )
-                            )
+        # param[].from on node / node_container / composable_node
+        for from_value in _iter_param_from_values(entry):
+            resolved, extra = resolve_path_substitutions(
+                from_value, path, isolated_ci=isolated_ci
+            )
+            issues.extend(extra)
+            if "$(var" in resolved or "$(" in resolved:
+                continue
+            cfg_path = make_path_relative_to_file(resolved, path)
+            if not cfg_path.is_file() and not isolated_ci:
+                suggestion = suggest_similar_path(cfg_path)
+                hint = f" (closest match: {suggestion})" if suggestion else ""
+                issues.append(
+                    Issue(
+                        path,
+                        f"Parameter file does not exist: {cfg_path}{hint}",
+                    )
+                )
 
     return issues
 

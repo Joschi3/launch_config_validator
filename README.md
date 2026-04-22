@@ -38,7 +38,10 @@ Supported patterns:
 A YAML file is treated as a **valid ROS 2 parameter config** if **at least one** of the following holds:
 
 1. It contains a top-level `ros__parameters` block.
-2. It is referenced in a launch file via a `node.param[].from` entry.
+2. It is referenced in a launch file via any `param[].from` entry — including:
+   * `node.param[].from`
+   * `node_container.param[].from` (container-level parameters)
+   * `composable_node.param[].from` (inside `node_container` or `load_composable_node`)
 
 
 
@@ -150,6 +153,8 @@ launch:
   - let: ...
   - include: ...
   - node: ...
+  - node_container: ...
+  - load_composable_node: ...
   - group: ...
   - push_ros_namespace: ...
   - set_remap: ...
@@ -234,8 +239,8 @@ Each list entry is exactly one of these actions.
 
   * list of:
 
-    * string (e.g. `my_pkg/config.yaml`) **or**
-    * object with arbitrary keys (e.g. `{name, value, from, allow_substs, ...}`)
+    * object with `name` and `value` (inline parameter) **or**
+    * object with `from` (path to a parameter file) and optional `allow_substs: true`
 
 * `remap`:
 
@@ -286,6 +291,80 @@ Each list entry is exactly one of these actions.
     to: "/athena/tf"
     unless: "$(var use_global_tf)"
 ```
+
+### 7. Composable Nodes & Containers
+
+ROS 2 allows loading multiple nodes (components) into a single process using containers. The YAML frontend provides two specific actions for this: `node_container` and `load_composable_node`.
+
+**Starting a Container (`node_container`)**
+
+Use this to start a new component container process. You can optionally load nodes into it immediately upon creation.
+
+```yaml
+- node_container:
+    pkg: "rclcpp_components"
+    exec: "component_container"       # Use 'component_container_mt' / 'component_container_isolated' for multi-threading
+    name: "my_container"
+    namespace: ""
+    output: "screen"
+    respawn: "true"
+    param:
+      - from: "$(find-pkg-share my_pkg)/config/container_params.yaml"
+        allow_substs: true
+    composable_node:
+      - pkg: "image_tools"
+        plugin: "image_tools::Cam2Image"
+        name: "cam2image"
+        param:
+          - name: "width"
+            value: 320
+```
+
+* Required: `pkg`, `exec`, `name`
+* Optional: `namespace`, `composable_node` (list of components), `output`, `args`, `respawn`, `respawn_delay`, `param`, `if`, `unless`
+* `param` on the container itself follows the same form as `node.param` (list of `{name, value}` objects or `{from, allow_substs}` objects).
+
+**Loading into an Existing Container (`load_composable_node`)**
+
+Use this to dynamically inject nodes into a container that is already running (identified by its target name).
+
+```yaml
+- load_composable_node:
+    target: "my_container"            # Must match the 'name' of the container
+    composable_node:
+      - pkg: "image_tools"
+        plugin: "image_tools::ShowImage"
+        name: "showimage"
+        remap:
+          - from: "/image"
+            to: "/athena/image"
+```
+
+* Required: `target`, `composable_node`
+* Optional: `if`, `unless`
+
+**Supported fields inside `composable_node`:**
+
+* `pkg`, `plugin`, `name` (strings, required)
+* `namespace` (string)
+* `param`:
+  * list of:
+    * object with `name` and `value` (inline parameter) **or**
+    * object with `from` (path to a parameter file) and optional `allow_substs: true`
+* `remap`: list of objects with `from` and `to`
+* `extra_arg`: list of objects with `name` and `value` (used for component-specific arguments, like `use_intra_process_comms`). `value` is written as a **string** (e.g. `value: "true"`), consistent with how boolean-like values are expressed elsewhere in the YAML frontend.
+
+**Notes on `target`:**
+
+The `target` string on `load_composable_node` is the fully-qualified name of the destination container (namespace + name, e.g. `/my_ns/my_container`). Substitutions are supported:
+
+```yaml
+- load_composable_node:
+    target: "$(var ros_namespace)/image_projection_container"
+    composable_node: [...]
+```
+
+The target container does not have to be defined in the same launch file — it may be started by an included launch file or an external process.
 
 ### Supported launch substitutions
 
