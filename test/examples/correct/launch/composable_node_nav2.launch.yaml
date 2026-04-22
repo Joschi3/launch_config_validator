@@ -1,0 +1,99 @@
+%YAML 1.2
+---
+launch:
+    - arg:
+        name: nav2_config
+        default: "nav2_default_config.yaml"
+    - arg:
+        name: nav2_costmap_config
+        default: "costmap/nav2_maze_costmap_config.yaml"
+    # Save the ros name space for nav2 costmaps as their namespace is automatically changed
+    - arg:
+        name: ros_namespace
+        default: ""
+    - let:
+        name: global_ns
+        value: "$(var ros_namespace)"
+
+    - set_remap:
+        from: "/tf"
+        to: "tf"
+    - set_remap:
+        from: "/tf_static"
+        to: "tf_static"
+
+
+    # Spin up the single process container for all Nav2 nodes
+    - node_container:
+        pkg: rclcpp_components
+        exec: component_container_isolated
+        name: nav2_container
+        namespace: ""
+        output: screen
+        respawn: "true" # The container will respawn if it crashes
+        param:
+            - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_config)"
+              allow_substs: true
+            - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_costmap_config)"
+              allow_substs: true
+
+        composable_node:
+            # Lifecycle Manager
+            - pkg: nav2_lifecycle_manager
+              plugin: nav2_lifecycle_manager::LifecycleManager
+              name: lifecycle_manager
+              extra_arg:
+                - name: use_intra_process_comms
+                  value: "true"
+              param:
+                - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_config)"
+                  allow_substs: true
+
+            # Local path follower
+            - pkg: nav2_controller
+              plugin: nav2_controller::ControllerServer
+              name: controller_server
+              extra_arg:
+                - name: use_intra_process_comms
+                  value: "true"
+              param:
+                - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_config)"
+                  allow_substs: true
+                - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_costmap_config)"
+                  allow_substs: true
+
+            # Global path planner
+            - pkg: nav2_planner
+              plugin: nav2_planner::PlannerServer
+              name: planner_server
+              extra_arg:
+                - name: use_intra_process_comms
+                  value: "true"
+              param:
+                - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_config)"
+                  allow_substs: true
+                - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_costmap_config)"
+                  allow_substs: true
+
+
+            # Behavior Tree interface
+            - pkg: nav2_bt_navigator
+              plugin: nav2_bt_navigator::BtNavigator
+              name: bt_navigator
+              extra_arg:
+                - name: use_intra_process_comms
+                  value: "true"
+              param:
+                - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_config)"
+                  allow_substs: true
+
+            # Behavior
+            - pkg: nav2_behaviors
+              plugin: behavior_server::BehaviorServer
+              name: behavior_server
+              extra_arg:
+                - name: use_intra_process_comms
+                  value: "true"
+              param:
+                - from: "$(find-pkg-share athena_software_launch)/configs/navigation/$(var nav2_config)"
+                  allow_substs: true

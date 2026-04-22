@@ -191,6 +191,123 @@
       "additionalProperties": false
     },
 
+    "ComposableNode": {
+      "title": "Composable Node",
+      "type": "object",
+      "required": ["pkg", "plugin", "name"],
+      "properties": {
+        "pkg": { "type": "string" },
+        "plugin": { "type": "string" },
+        "name": { "type": "string" },
+        "namespace": { "type": "string" },
+        "param": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "remap": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "extra_arg": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "type": "string" },
+              "value": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "boolean" },
+                  { "type": "number" }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "NodeContainerAction": {
+      "type": "object",
+      "required": ["node_container"],
+      "properties": {
+        "node_container": {
+          "title": "Node Container Action Properties",
+          "type": "object",
+          "required": ["pkg", "exec", "name"],
+          "properties": {
+            "pkg": { "type": "string" },
+            "exec": { "type": "string" },
+            "name": { "type": "string" },
+            "namespace": { "type": "string" },
+            "output": { "type": "string" },
+            "respawn": { "type": "string" },
+            "respawn_delay": { "type": "number" },
+            "if": { "type": "string" },
+            "unless": { "type": "string" },
+            "args": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+              ]
+            },
+            "param": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "object", "additionalProperties": true }
+                ]
+              }
+            },
+            "composable_node": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/ComposableNode" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "LoadComposableNodeAction": {
+      "type": "object",
+      "required": ["load_composable_node"],
+      "properties": {
+        "load_composable_node": {
+          "title": "Load Composable Node Action Properties",
+          "type": "object",
+          "required": ["target", "composable_node"],
+          "properties": {
+            "target": { "type": "string" },
+            "composable_node": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/ComposableNode" }
+            },
+            "if": { "type": "string" },
+            "unless": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
     "ActionItem": {
       "title": "Launch Action Item",
       "type": "object",
@@ -201,7 +318,9 @@
         { "$ref": "#/definitions/SetRemapAction" },
         { "$ref": "#/definitions/IncludeAction" },
         { "$ref": "#/definitions/GroupAction" },
-        { "$ref": "#/definitions/LetAction" }
+        { "$ref": "#/definitions/LetAction" },
+        { "$ref": "#/definitions/NodeContainerAction" },
+        { "$ref": "#/definitions/LoadComposableNodeAction" }
       ]
     }
   },
